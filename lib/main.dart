@@ -1,10 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'app_theme.dart';
 import 'screens/home_screen.dart';
-import 'screens/transactions_screen.dart';
-import 'screens/goals_screen.dart';
-import 'screens/ai_chat_screen.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  SystemChrome.setSystemUIOverlayStyle(
+    const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.light,
+      systemNavigationBarColor: AppTheme.scaffoldBg,
+      systemNavigationBarIconBrightness: Brightness.light,
+    ),
+  );
   runApp(const ThanguApp());
 }
 
@@ -15,10 +23,7 @@ class ThanguApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Thangu',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-        useMaterial3: true,
-      ),
+      theme: AppTheme.darkTheme,
       home: const HomeScreen(),
       debugShowCheckedModeBanner: false,
     );

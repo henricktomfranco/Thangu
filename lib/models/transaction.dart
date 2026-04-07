@@ -44,22 +44,22 @@ class Transaction {
       'description': description,
       'date': date.toIso8601String(),
       'sender': sender,
-      'isCategorizedByAI': isCategorizedByAI,
-      'aiConfidence': aiConfidence,
+      'is_categorized_by_ai': isCategorizedByAI ? 1 : 0,
+      'ai_confidence': aiConfidence,
     };
   }
 
   factory Transaction.fromMap(Map<String, dynamic> map) {
     return Transaction(
       id: map['id'],
-      amount: map['amount'],
+      amount: (map['amount'] as num).toDouble(),
       type: map['type'],
       category: map['category'],
-      description: map['description'],
+      description: map['description'] ?? '',
       date: DateTime.parse(map['date']),
-      sender: map['sender'],
-      isCategorizedByAI: map['isCategorizedByAI'] ?? false,
-      aiConfidence: map['aiConfidence'] ?? 0.0,
+      sender: map['sender'] ?? '',
+      isCategorizedByAI: (map['is_categorized_by_ai'] ?? 0) == 1,
+      aiConfidence: (map['ai_confidence'] as num?)?.toDouble() ?? 0.0,
     );
   }
 

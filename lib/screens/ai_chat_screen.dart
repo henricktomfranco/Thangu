@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+import '../app_theme.dart';
 import '../services/ai_service.dart';
 import '../models/transaction.dart';
-import '../models/goal.dart';
 import '../services/database_service.dart';
 
 class AiChatScreen extends StatefulWidget {
@@ -11,34 +11,41 @@ class AiChatScreen extends StatefulWidget {
   State<AiChatScreen> createState() => _AiChatScreenState();
 }
 
-class _AiChatScreenState extends State<AiChatScreen> {
+class _AiChatScreenState extends State<AiChatScreen>
+    with SingleTickerProviderStateMixin {
   final AiService _aiService = AiService();
   final DatabaseService _dbService = DatabaseService();
-
   final TextEditingController _messageController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
   final List<Map<String, dynamic>> _messages = [];
   bool _isLoading = false;
   bool _isInitialized = false;
 
+  late AnimationController _typingController;
+
   @override
   void initState() {
     super.initState();
+    _typingController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat();
     _initializeChat();
   }
 
+  @override
+  void dispose() {
+    _messageController.dispose();
+    _scrollController.dispose();
+    _typingController.dispose();
+    super.dispose();
+  }
+
   Future<void> _initializeChat() async {
-    setState(() {
-      _isLoading = true;
-    });
-
+    setState(() => _isLoading = true);
     try {
-      // Get some financial data to provide context
       final transactions = await _dbService.getTransactions(limit: 20);
-      final goals = await _dbService.getGoals();
-
-      // Calculate monthly income/expenses
-      double monthlyIncome = 0;
-      double monthlyExpenses = 0;
+      double monthlyIncome = 0, monthlyExpenses = 0;
       final now = DateTime.now();
       final startOfMonth = DateTime(now.year, now.month, 1);
 
@@ -52,7 +59,6 @@ class _AiChatScreenState extends State<AiChatScreen> {
         }
       }
 
-      // Get initial advice from Thangu AI
       final advice = await _aiService.getFinancialAdvice(
         monthlyIncome: monthlyIncome,
         monthlyExpenses: monthlyExpenses,
@@ -72,40 +78,34 @@ class _AiChatScreenState extends State<AiChatScreen> {
       setState(() {
         _isLoading = false;
         _isInitialized = true;
-      });
-      if (mounted) {
         _messages.add({
           'text':
-              "Hello! I'm Thangu, your AI finance assistant. I'm having trouble connecting to my knowledge base right now, but I can still help you track your transactions and savings goals!",
+              "Hi! I'm Thangu, your AI finance assistant 🤖\n\nI'm having trouble connecting right now, but I can still help you track transactions and savings goals!",
           'isUser': false,
           'timestamp': DateTime.now(),
         });
-      }
+      });
     }
   }
 
   Future<void> _sendMessage() async {
-    final String messageText = _messageController.text.trim();
-    if (messageText.isEmpty || _isLoading) return;
+    final text = _messageController.text.trim();
+    if (text.isEmpty || _isLoading) return;
 
-    // Add user message
     setState(() {
       _messages.add({
-        'text': messageText,
+        'text': text,
         'isUser': true,
         'timestamp': DateTime.now(),
       });
       _messageController.clear();
       _isLoading = true;
     });
+    _scrollToBottom();
 
     try {
-      // Get financial context for better responses
       final transactions = await _dbService.getTransactions(limit: 50);
-      final goals = await _dbService.getGoals();
-
-      double monthlyIncome = 0;
-      double monthlyExpenses = 0;
+      double monthlyIncome = 0, monthlyExpenses = 0;
       final now = DateTime.now();
       final startOfMonth = DateTime(now.year, now.month, 1);
 
@@ -119,14 +119,12 @@ class _AiChatScreenState extends State<AiChatScreen> {
         }
       }
 
-      // Get AI response
       final response = await _aiService.getFinancialAdvice(
         monthlyIncome: monthlyIncome,
         monthlyExpenses: monthlyExpenses,
         recentTransactions: transactions,
       );
 
-      // Add bot response
       if (mounted) {
         setState(() {
           _messages.add({
@@ -136,144 +134,277 @@ class _AiChatScreenState extends State<AiChatScreen> {
           });
           _isLoading = false;
         });
+        _scrollToBottom();
       }
     } catch (e) {
       if (mounted) {
         setState(() {
           _messages.add({
             'text':
-                "I'm sorry, I'm having trouble thinking right now. Please try again in a moment.",
+                "I'm having trouble right now. Please try again in a moment.",
             'isUser': false,
             'timestamp': DateTime.now(),
           });
           _isLoading = false;
         });
+        _scrollToBottom();
       }
     }
+  }
+
+  void _scrollToBottom() {
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Row(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_rounded, size: 20),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: Row(
           children: [
-            Icon(Icons.account_balance, color: Colors.white),
-            SizedBox(width: 8),
-            Text('Thangu AI'),
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                gradient: AppTheme.primaryGradient,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.auto_awesome,
+                  color: Colors.white, size: 18),
+            ),
+            const SizedBox(width: 12),
+            const Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Thangu AI',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                Text('Financial Assistant',
+                    style: TextStyle(fontSize: 11, color: AppTheme.textTertiary)),
+              ],
+            ),
           ],
         ),
-        backgroundColor: Colors.deepPurple,
       ),
       body: Column(
         children: [
+          // Messages
           Expanded(
             child: _isLoading && !_isInitialized
-                ? const Center(child: CircularProgressIndicator())
+                ? const Center(
+                    child:
+                        CircularProgressIndicator(color: AppTheme.primary))
                 : _messages.isEmpty
-                    ? const Center(
-                        child: Text(
-                          'Start the conversation!',
-                          style: TextStyle(color: Colors.grey, fontSize: 16),
-                        ),
-                      )
+                    ? _buildWelcome()
                     : ListView.builder(
-                        padding: const EdgeInsets.all(16),
-                        itemCount: _messages.length,
+                        controller: _scrollController,
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                        itemCount: _messages.length + (_isLoading ? 1 : 0),
                         itemBuilder: (context, index) {
-                          final message = _messages[index];
-                          final bool isUser = message['isUser'] as bool;
-                          final String text = message['text'] as String;
-                          final DateTime timestamp =
-                              message['timestamp'] as DateTime;
-
-                          return Align(
-                            alignment: isUser
-                                ? Alignment.centerRight
-                                : Alignment.centerLeft,
-                            child: Container(
-                              margin: const EdgeInsets.symmetric(
-                                  vertical: 4, horizontal: 8),
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 16, vertical: 10),
-                              decoration: BoxDecoration(
-                                color: isUser
-                                    ? Colors.deepPurple[100]
-                                    : Colors.grey[200],
-                                borderRadius: BorderRadius.only(
-                                  topLeft: Radius.circular(isUser ? 16 : 0),
-                                  topRight: Radius.circular(isUser ? 0 : 16),
-                                  bottomLeft: const Radius.circular(16),
-                                  bottomRight: const Radius.circular(16),
-                                ),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    text,
-                                    style: const TextStyle(
-                                      fontSize: 16,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    '${timestamp.hour}:${timestamp.minute.toString().padLeft(2, '0')}',
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      color: isUser
-                                          ? Colors.deepPurple[600]
-                                          : Colors.grey[600],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
+                          if (index == _messages.length) {
+                            return _buildTypingIndicator();
+                          }
+                          final msg = _messages[index];
+                          return _buildMessageBubble(
+                            text: msg['text'] as String,
+                            isUser: msg['isUser'] as bool,
+                            timestamp: msg['timestamp'] as DateTime,
                           );
                         },
                       ),
           ),
-          _isLoading && _isInitialized
-              ? const Padding(
-                  padding: EdgeInsets.all(16.0),
-                  child: CircularProgressIndicator(),
-                )
-              : Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _messageController,
-                          decoration: InputDecoration(
-                            hintText: 'Ask Thangu about your finances...',
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(24),
-                            ),
-                            contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 20, vertical: 16),
-                            filled: true,
-                            fillColor: Colors.grey[100],
-                            prefixIcon: const Icon(Icons.chat_bubble_outline),
-                            suffixIcon: IconButton(
-                              icon: const Icon(Icons.send),
-                              onPressed: _sendMessage,
-                            ),
-                          ),
-                          onSubmitted: (_) => _sendMessage(),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+          // Input
+          _buildInputBar(),
         ],
       ),
     );
   }
 
-  @override
-  void dispose() {
-    _messageController.dispose();
-    super.dispose();
+  Widget _buildWelcome() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: AppTheme.primary.withOpacity(0.1),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.auto_awesome,
+                size: 48, color: AppTheme.primaryLight),
+          ),
+          const SizedBox(height: 20),
+          const Text('Ask Thangu anything!',
+              style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          const Text('Get personalized financial advice',
+              style: TextStyle(color: AppTheme.textTertiary)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMessageBubble({
+    required String text,
+    required bool isUser,
+    required DateTime timestamp,
+  }) {
+    return Align(
+      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        constraints:
+            BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: isUser
+              ? AppTheme.primary.withOpacity(0.2)
+              : AppTheme.surfaceCard,
+          borderRadius: BorderRadius.only(
+            topLeft: Radius.circular(isUser ? 16 : 4),
+            topRight: Radius.circular(isUser ? 4 : 16),
+            bottomLeft: const Radius.circular(16),
+            bottomRight: const Radius.circular(16),
+          ),
+          border: Border.all(
+            color: isUser
+                ? AppTheme.primary.withOpacity(0.15)
+                : Colors.white.withOpacity(0.05),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              text,
+              style: TextStyle(
+                fontSize: 14,
+                color:
+                    isUser ? AppTheme.textPrimary : AppTheme.textPrimary,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '${timestamp.hour}:${timestamp.minute.toString().padLeft(2, '0')}',
+              style: TextStyle(
+                fontSize: 10,
+                color: isUser
+                    ? AppTheme.primaryLight.withOpacity(0.6)
+                    : AppTheme.textTertiary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTypingIndicator() {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: AppTheme.surfaceCard,
+          borderRadius: const BorderRadius.only(
+            topLeft: Radius.circular(4),
+            topRight: Radius.circular(16),
+            bottomLeft: Radius.circular(16),
+            bottomRight: Radius.circular(16),
+          ),
+          border: Border.all(color: Colors.white.withOpacity(0.05)),
+        ),
+        child: AnimatedBuilder(
+          animation: _typingController,
+          builder: (context, _) {
+            return Row(
+              mainAxisSize: MainAxisSize.min,
+              children: List.generate(3, (i) {
+                final delay = i * 0.2;
+                final t = ((_typingController.value + delay) % 1.0);
+                final opacity = (1 - (t * 2 - 1).abs()).clamp(0.3, 1.0);
+                return Container(
+                  width: 8,
+                  height: 8,
+                  margin: const EdgeInsets.symmetric(horizontal: 3),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primary.withOpacity(opacity),
+                    shape: BoxShape.circle,
+                  ),
+                );
+              }),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInputBar() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        border: Border(
+          top: BorderSide(color: Colors.white.withOpacity(0.06)),
+        ),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _messageController,
+                style: const TextStyle(color: AppTheme.textPrimary),
+                decoration: InputDecoration(
+                  hintText: 'Ask about your finances...',
+                  fillColor: AppTheme.surfaceInput,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(AppTheme.radiusRound),
+                    borderSide: BorderSide.none,
+                  ),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                ),
+                onSubmitted: (_) => _sendMessage(),
+                maxLines: null,
+              ),
+            ),
+            const SizedBox(width: 10),
+            GestureDetector(
+              onTap: _sendMessage,
+              child: Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  gradient: AppTheme.primaryGradient,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(Icons.send_rounded,
+                    color: Colors.white, size: 20),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../app_theme.dart';
 
 class CategorySelector extends StatefulWidget {
   final String initialCategory;
@@ -43,7 +44,6 @@ class _CategorySelectorState extends State<CategorySelector> {
   void initState() {
     super.initState();
     _selectedCategory = widget.initialCategory;
-    _customCategoryController.text = widget.initialCategory;
   }
 
   @override
@@ -53,19 +53,13 @@ class _CategorySelectorState extends State<CategorySelector> {
   }
 
   void _onCategorySelected(String category) {
-    setState(() {
-      _selectedCategory = category;
-      _showCustomField = false;
-    });
-
-    if (_selectedCategory == 'Add New Category') {
+    if (category == 'Add New Category') {
       setState(() {
         _showCustomField = true;
+        _customCategoryController.clear();
       });
-      _customCategoryController.clear();
     } else {
-      widget.onCategorySelected(_selectedCategory);
-      Navigator.of(context).pop();
+      widget.onCategorySelected(category);
     }
   }
 
@@ -73,120 +67,151 @@ class _CategorySelectorState extends State<CategorySelector> {
     final String newCategory = _customCategoryController.text.trim();
     if (newCategory.isNotEmpty) {
       widget.onCategorySelected(newCategory);
-      Navigator.of(context).pop();
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Select Category'),
-        centerTitle: true,
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: ListView.builder(
-              itemCount: _predefinedCategories.length + 1, // +1 for "Add New"
-              itemBuilder: (context, index) {
-                if (index == _predefinedCategories.length) {
-                  // Last item is "Add New Category"
-                  return ListTile(
-                    leading: const Icon(Icons.add_circle_outline),
-                    title: const Text('Add New Category'),
-                    onTap: () => _onCategorySelected('Add New Category'),
-                  );
-                } else {
-                  final String category = _predefinedCategories[index];
-                  return ListTile(
-                    leading: Icon(_getIconForCategory(category)),
-                    title: Text(category),
-                    selected: _selectedCategory == category,
-                    onTap: () => _onCategorySelected(category),
-                  );
-                }
-              },
+    return Column(
+      children: [
+        // Handle bar
+        Container(
+          width: 40,
+          height: 4,
+          margin: const EdgeInsets.only(top: 12, bottom: 8),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.15),
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        // Header
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+          child: Row(
+            children: [
+              const Text('Select Category', style: AppTheme.heading3),
+              const Spacer(),
+              GestureDetector(
+                onTap: () => Navigator.pop(context),
+                child: Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.06),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.close_rounded,
+                      color: AppTheme.textTertiary, size: 18),
+                ),
+              ),
+            ],
+          ),
+        ),
+        // Category grid
+        Expanded(
+          child: GridView.builder(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              mainAxisSpacing: 10,
+              crossAxisSpacing: 10,
+              childAspectRatio: 1.1,
+            ),
+            itemCount: _predefinedCategories.length + 1,
+            itemBuilder: (context, index) {
+              if (index == _predefinedCategories.length) {
+                return _buildCategoryTile(
+                  icon: Icons.add_circle_outline_rounded,
+                  label: 'Add New',
+                  color: AppTheme.textTertiary,
+                  isSelected: false,
+                  onTap: () => _onCategorySelected('Add New Category'),
+                );
+              }
+              final category = _predefinedCategories[index];
+              final color = AppTheme.getCategoryColor(category);
+              return _buildCategoryTile(
+                icon: AppTheme.getCategoryIcon(category),
+                label: category,
+                color: color,
+                isSelected: _selectedCategory == category,
+                onTap: () => _onCategorySelected(category),
+              );
+            },
+          ),
+        ),
+        // Custom field
+        if (_showCustomField)
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _customCategoryController,
+                    autofocus: true,
+                    style: const TextStyle(color: AppTheme.textPrimary),
+                    decoration: const InputDecoration(
+                      hintText: 'Category name...',
+                      prefixIcon: Icon(Icons.category_rounded,
+                          color: AppTheme.textTertiary),
+                    ),
+                    onSubmitted: (_) => _onCustomCategoryConfirmed(),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                ElevatedButton(
+                  onPressed: _onCustomCategoryConfirmed,
+                  child: const Text('Save'),
+                ),
+              ],
             ),
           ),
-          if (_showCustomField)
-            Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: TextField(
-                controller: _customCategoryController,
-                autofocus: true,
-                decoration: const InputDecoration(
-                  labelText: 'Category Name',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.category),
-                ),
-                onSubmitted: (_) => _onCustomCategoryConfirmed(),
-              ),
-            ),
-          if (_showCustomField)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: _onCustomCategoryConfirmed,
-                      child: const Text('Save'),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  OutlinedButton(
-                    onPressed: () {
-                      setState(() {
-                        _showCustomField = false;
-                      });
-                    },
-                    child: const Text('Cancel'),
-                  ),
-                ],
-              ),
-            ),
-        ],
-      ),
+      ],
     );
   }
 
-  IconData _getIconForCategory(String category) {
-    switch (category) {
-      case 'Food & Dining':
-        return Icons.restaurant;
-      case 'Transportation':
-        return Icons.directions_car;
-      case 'Shopping':
-        return Icons.shopping_cart;
-      case 'Entertainment':
-        return Icons.movie;
-      case 'Bills & Utilities':
-        return Icons.receipt;
-      case 'Groceries':
-        return Icons.local_grocery_store;
-      case 'Healthcare':
-        return Icons.local_hospital;
-      case 'Income':
-        return Icons.attach_money;
-      case 'Transfer':
-        return Icons.swap_vert;
-      case 'Education':
-        return Icons.school;
-      case 'Travel':
-        return Icons.flight;
-      case 'Personal Care':
-        return Icons.face;
-      case 'Gifts & Donations':
-        return Icons.card_giftcard;
-      case 'Fees & Charges':
-        return Icons.account_balance;
-      case 'Investment':
-        return Icons.trending_up;
-      case 'Other':
-        return Icons.help_outline;
-      default:
-        return Icons.category;
-    }
+  Widget _buildCategoryTile({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? color.withOpacity(0.15)
+              : AppTheme.surfaceCard,
+          borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+          border: Border.all(
+            color: isSelected
+                ? color.withOpacity(0.4)
+                : Colors.white.withOpacity(0.05),
+            width: isSelected ? 1.5 : 1,
+          ),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: color, size: 26),
+            const SizedBox(height: 6),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11,
+                color: isSelected ? color : AppTheme.textSecondary,
+                fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+              ),
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

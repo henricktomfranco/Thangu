@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../app_theme.dart';
 import '../models/goal.dart';
 
 class GoalCard extends StatelessWidget {
@@ -11,120 +12,134 @@ class GoalCard extends StatelessWidget {
     required this.onTap,
   });
 
-  String _formatCurrency(double amount) {
-    return '\$${amount.toStringAsFixed(2)}';
-  }
-
-  String _getProgressText() {
-    final double progress = goal.progressPercentage;
-    final int percent = (progress * 100).round();
-    return '$percent%';
-  }
-
-  Color _getProgressColor() {
-    final double progress = goal.progressPercentage;
-    if (progress >= 1.0) return Colors.green;
-    if (progress >= 0.7) return Colors.lightGreen;
-    if (progress >= 0.4) return Colors.orange;
-    return Colors.red;
-  }
-
   @override
   Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(
-                    child: Text(
-                      goal.name,
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
+    final progress = goal.progressPercentage;
+    final percent = (progress * 100).round();
+    final color = progress >= 1.0
+        ? AppTheme.accentGreen
+        : progress >= 0.5
+            ? AppTheme.accent
+            : AppTheme.accentOrange;
+
+    final daysLeft = goal.targetDate.difference(DateTime.now()).inDays;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          gradient: AppTheme.cardGradient,
+          borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+          border: Border.all(color: Colors.white.withOpacity(0.06)),
+          boxShadow: AppTheme.softShadow,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header row
+            Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: color.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(Icons.flag_rounded, color: color, size: 22),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        goal.name,
+                        style: const TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
+                      const SizedBox(height: 3),
+                      Text(
+                        goal.category,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: AppTheme.textTertiary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: color.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    '$percent%',
+                    style: TextStyle(
+                      color: color,
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            // Progress bar
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: progress,
+                backgroundColor: Colors.white.withOpacity(0.06),
+                valueColor: AlwaysStoppedAnimation<Color>(color),
+                minHeight: 6,
+              ),
+            ),
+            const SizedBox(height: 12),
+            // Bottom info
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  '\$${goal.currentAmount.toStringAsFixed(0)} / \$${goal.targetAmount.toStringAsFixed(0)}',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: AppTheme.textSecondary,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                Row(
+                  children: [
+                    Icon(
+                      daysLeft > 0
+                          ? Icons.schedule_rounded
+                          : Icons.check_circle_rounded,
+                      size: 14,
+                      color: AppTheme.textTertiary,
                     ),
-                    decoration: BoxDecoration(
-                      color: _getProgressColor().withOpacity(0.2),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      _getProgressText(),
+                    const SizedBox(width: 4),
+                    Text(
+                      daysLeft > 0 ? '$daysLeft days left' : 'Deadline passed',
                       style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: _getProgressColor(),
-                        fontSize: 14,
+                        fontSize: 12,
+                        color: daysLeft > 0
+                            ? AppTheme.textTertiary
+                            : AppTheme.accentRed,
                       ),
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Text(
-                'Target: ${_formatCurrency(goal.targetAmount)}',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey[600],
+                  ],
                 ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'Saved: ${_formatCurrency(goal.currentAmount)}',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey[600],
-                ),
-              ),
-              const SizedBox(height: 8),
-              LinearProgressIndicator(
-                value: goal.progressPercentage,
-                backgroundColor: Colors.grey[300]!,
-                valueColor: AlwaysStoppedAnimation<Color>(_getProgressColor()),
-                minHeight: 8,
-                borderRadius: BorderRadius.circular(4),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Category: ${goal.category}',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey[600],
-                    ),
-                  ),
-                  Text(
-                    'Target Date:',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey[600],
-                    ),
-                  ),
-                  Text(
-                    '${goal.targetDate.month}/${goal.targetDate.day}/${goal.targetDate.year}',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
+              ],
+            ),
+          ],
         ),
       ),
     );
