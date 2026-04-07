@@ -259,14 +259,23 @@ class DatabaseService {
     );
   }
 
-  async getSetting(key: string): Promise<string | null> {
-    if (!this.db) throw new Error('Database not initialized');
-    const result = await this.db.getFirstAsync<{ value: string }>(
-      `SELECT value FROM settings WHERE key = ?`,
-      [key]
-    );
-    return result?.value || null;
-  }
+   async getSetting(key: string): Promise<string | null> {
+     if (!this.db) throw new Error('Database not initialized');
+     const result = await this.db.getFirstAsync<{ value: string }>(
+       `SELECT value FROM settings WHERE key = ?`,
+       [key]
+     );
+     return result?.value || null;
+   }
+
+   async getCurrency(): Promise<string> {
+     const currency = await this.getSetting('currency') || 'INR';
+     return currency;
+   }
+
+   async setCurrency(currency: string): Promise<void> {
+     await this.setSetting('currency', currency);
+   }
 
   async getAIConfig(): Promise<AIConfig> {
     const base_url = await this.getSetting('ai_base_url') || '';

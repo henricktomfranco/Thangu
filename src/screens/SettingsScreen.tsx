@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, ScrollView, Alert } from 'react-native';
+import { RadioButton } from 'react-native-paper';
 import {
   Text,
   TextInput,
@@ -20,11 +21,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const SETTINGS_KEY = 'ai_config';
 
 export default function SettingsScreen() {
-  const [config, setConfig] = useState<AIConfig>({
-    base_url: '',
-    api_key: '',
-    model: '',
-  });
+const [config, setConfig] = useState<AIConfig>({
+  base_url: '',
+  api_key: '',
+  model: '',
+});
+const [currency, setCurrency] = useState('INR');
+const currencies = ['INR', 'USD', 'EUR', 'GBP', 'JPY', 'CAD', 'AUD', 'CNY', 'SGD', 'CHF'];
   const [isLoading, setIsLoading] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [isAutoCategorize, setIsAutoCategorize] = useState(true);
@@ -239,19 +242,44 @@ export default function SettingsScreen() {
         </Card.Content>
       </Card>
 
-      {/* Notification Settings */}
-      <Card style={styles.card}>
-        <Card.Title title="Notifications" />
-        <Card.Content>
-          <List.Item
-            title="Auto-categorize SMS"
-            description="Automatically categorize transactions from SMS"
-            right={() => (
-              <Switch value={isAutoCategorize} onValueChange={handleToggleAutoCategorize} />
-            )}
-          />
-        </Card.Content>
-      </Card>
+       {/* Notification Settings */}
+       <Card style={styles.card}>
+         <Card.Title title="Notifications" />
+         <Card.Content>
+           <List.Item
+             title="Auto-categorize SMS"
+             description="Automatically categorize transactions from SMS"
+             right={() => (
+               <Switch value={isAutoCategorize} onValueChange={handleToggleAutoCategorize} />
+             )}
+           />
+         </Card.Content>
+       </Card>
+
+       {/* Currency Settings */}
+       <Card style={styles.card}>
+         <Card.Title title="Currency" subtitle="Select your preferred currency" />
+         <Card.Content>
+           <View style={styles.currencyPicker}>
+             {currencies.map((curr) => (
+               <View key={curr} style={styles.currencyOption}>
+                 <RadioButton
+                   value={curr}
+                   status={currency === curr ? 'checked' : 'unchecked'}
+                   onPress={() => setCurrency(curr)}
+                   color="#6200ee"
+                 />
+                 <Text variant="bodyMedium" style={{ marginLeft: 8 }}>
+                   {curr}
+                 </Text>
+               </View>
+             ))}
+           </View>
+           <HelperText type="info">
+             Selected currency will be used for all new transactions
+           </HelperText>
+         </Card.Content>
+       </Card>
 
       {/* Provider Examples */}
       <Card style={styles.card}>
@@ -366,11 +394,21 @@ const styles = StyleSheet.create({
   dataButton: {
     marginVertical: 6,
   },
-  footer: {
-    padding: 20,
-    alignItems: 'center',
-  },
-  version: {
-    color: '#999',
-  },
-});
+   footer: {
+     padding: 20,
+     alignItems: 'center',
+   },
+   version: {
+     color: '#999',
+   },
+   currencyPicker: {
+     marginTop: 12,
+   },
+   currencyOption: {
+     flexDirection: 'row',
+     alignItems: 'center',
+     paddingVertical: 12,
+     borderBottomWidth: 1,
+     borderBottomColor: '#f0f0f0',
+   },
+ });
