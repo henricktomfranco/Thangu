@@ -25,6 +25,7 @@ export default function DashboardScreen({ navigation }: any) {
   const [refreshing, setRefreshing] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [currency, setCurrency] = useState('INR');
 
   const loadDashboardData = useCallback(async () => {
     try {
@@ -66,9 +67,15 @@ export default function DashboardScreen({ navigation }: any) {
     }
   }, []);
 
-  useEffect(() => {
-    loadDashboardData();
-  }, [loadDashboardData]);
+   useEffect(() => {
+     loadDashboardData();
+     loadCurrency();
+   }, [loadDashboardData]);
+
+   const loadCurrency = async () => {
+     const currency = await database.getCurrency();
+     setCurrency(currency);
+   };
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -103,13 +110,28 @@ export default function DashboardScreen({ navigation }: any) {
     };
   }, []);
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      maximumFractionDigits: 0,
-    }).format(amount);
-  };
+   const formatCurrency = (amount: number) => {
+     // Map currency codes to Intl.NumberFormat compatible codes
+     const currencyMap: Record<string, string> = {
+       'INR': 'INR',
+       'USD': 'USD',
+       'EUR': 'EUR',
+       'GBP': 'GBP',
+       'JPY': 'JPY',
+       'CAD': 'CAD',
+       'AUD': 'AUD',
+       'CNY': 'CNY',
+       'SGD': 'SGD',
+       'CHF': 'CHF'
+     };
+     const formatCurrencyCode = currencyMap[currency] || 'INR';
+     
+     return new Intl.NumberFormat('en-IN', {
+       style: 'currency',
+       currency: formatCurrencyCode,
+       maximumFractionDigits: formatCurrencyCode === 'JPY' ? 0 : 2,
+     }).format(amount);
+   };
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -167,9 +189,9 @@ export default function DashboardScreen({ navigation }: any) {
         <Card style={[styles.balanceCard, styles.incomeCard]}>
           <Card.Content>
             <Text variant="titleSmall" style={styles.balanceLabel}>Income</Text>
-            <Text variant="headlineSmall" style={[styles.balanceAmount, styles.incomeText]}>
-              {formatCurrency(balance.income)}
-            </Text>
+             <Text variant="headlineSmall" style={[styles.balanceAmount, styles.incomeText]}>
+               {formatCurrency(balance.income)}
+             </Text>
           </Card.Content>
         </Card>
 

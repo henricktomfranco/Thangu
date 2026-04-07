@@ -108,24 +108,26 @@ class DatabaseService {
   }
 
   // Transactions
-  async addTransaction(transaction: Omit<Transaction, 'id' | 'created_at'>): Promise<number> {
-    if (!this.db) throw new Error('Database not initialized');
-    const result = await this.db.runAsync(
-      `INSERT INTO transactions (amount, currency, category_id, merchant, description, sms_body, transaction_type, transaction_date)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        transaction.amount,
-        transaction.currency || 'INR',
-        transaction.category_id,
-        transaction.merchant,
-        transaction.description,
-        transaction.sms_body,
-        transaction.transaction_type,
-        transaction.transaction_date,
-      ]
-    );
-    return result.lastInsertRowId;
-  }
+   async addTransaction(transaction: Omit<Transaction, 'id' | 'created_at'>): Promise<number> {
+     if (!this.db) throw new Error('Database not initialized');
+     // Use transaction currency if provided, otherwise get from settings, fallback to INR
+     const transactionCurrency = transaction.currency || await this.getCurrency() || 'INR';
+     const result = await this.db.runAsync(
+       `INSERT INTO transactions (amount, currency, category_id, merchant, description, sms_body, transaction_type, transaction_date)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+       [
+         transaction.amount,
+         transactionCurrency,
+         transaction.category_id,
+         transaction.merchant,
+         transaction.description,
+         transaction.sms_body,
+         transaction.transaction_type,
+         transaction.transaction_date,
+       ]
+     );
+     return result.lastInsertRowId;
+   }
 
   async updateTransaction(id: number, updates: Partial<Transaction>): Promise<void> {
     if (!this.db) throw new Error('Database not initialized');
@@ -273,16 +275,23 @@ class DatabaseService {
      return currency;
    }
 
+   // Synchronous version for use in render methods (returns default if not initialized)
+   getCurrencySync(): string {
+     // This is a fallback - in practice, currency should be loaded via useEffect
+     // For now, we'll return INR as default and rely on state management in components
+     return 'INR';
+   }
+
    async setCurrency(currency: string): Promise<void> {
      await this.setSetting('currency', currency);
    }
 
-  async getAIConfig(): Promise<AIConfig> {
-    const base_url = await this.getSetting('ai_base_url') || '';
-    const api_key = await this.getSetting('ai_api_key') || '';
-    const model = await this.getSetting('ai_model') || '';
-    return { base_url, api_key, model };
-  }
+   async getAIConfig(): Promise<AIConfig> {
+     const base_url = await this.getSetting('ai_base_url') || '';
+     const api_key = await this.getSetting('ai_api_key') || '';
+     const model = await this.getSetting('ai_model') || '';
+     return { base_url, api_key, model };
+   }
 
   async saveAIConfig(config: AIConfig): Promise<void> {
     await this.setSetting('ai_base_url', config.base_url);
