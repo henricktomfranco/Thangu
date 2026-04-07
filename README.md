@@ -27,6 +27,12 @@ An intelligent personal finance manager app built with Flutter and Dart that rea
 - Budget optimization tips using proven methods (50/30/20 rule)
 - Personalized savings recommendations
 
+### 📈 Advanced Analytics & Reporting
+- Visual spending analysis with charts
+- Category breakdown of expenses
+- Daily spending trends
+- Export data for backup or further analysis
+
 ### 🔒 Privacy-Focused
 - All data stored locally on your device
 - No personal financial data leaves your phone
@@ -49,7 +55,7 @@ An intelligent personal finance manager app built with Flutter and Dart that rea
 ### Setup
 1. Clone the repository:
    ```bash
-   git clone https://github.com/henricktomfranco/Thangu.git
+   git clone https://github.com/your-username/Thangu.git
    cd Thangu
    ```
 
@@ -60,14 +66,18 @@ An intelligent personal finance manager app built with Flutter and Dart that rea
 
 3. Set up Ollama (for AI categorization):
    ```bash
-   # Install Ollama from https://ollama.ai/download
+   # Install Ollama from https://ollama.ai
    ollama pull llama2  # Download the Llama 2 model
    # Ollama runs automatically on localhost:11434
    ```
 
 4. Run the app:
    ```bash
+   # For mobile
    flutter run
+   
+   # For web
+   flutter run -d web
    ```
 
 ## Architecture
@@ -75,6 +85,7 @@ An intelligent personal finance manager app built with Flutter and Dart that rea
 ```
 lib/
 ├── main.dart              # App entry point
+├── app_theme.dart         # Centralized theme and styling
 ├── models/                # Data models
 │   ├── transaction.dart   # Transaction data class
 │   └── goal.dart          # Savings goal data class
@@ -82,15 +93,20 @@ lib/
 │   ├── home_screen.dart   # Main dashboard
 │   ├── transactions_screen.dart # Transaction management
 │   ├── goals_screen.dart  # Goal tracking
-│   └── ai_chat_screen.dart # AI chat interface
+│   ├── ai_chat_screen.dart # AI chat interface
+│   ├── settings_screen.dart # App settings
+│   ├── analytics_screen.dart # Financial analytics and reporting
+│   └── category_management_screen.dart # Category management
+│   └── category_selector.dart # Category selection UI
 ├── services/              # Business logic
 │   ├── sms_service.dart   # SMS parsing simulation
+│   ├── real_sms_service.dart # Real SMS processing (to be implemented)
 │   ├── ai_service.dart    # Ollama AI integration
-│   └── database_service.dart # Local SQLite storage
+│   ├── database_service.dart # Local SQLite storage
+│   └── export_service.dart # Data export/import functionality
 ├── widgets/               # Reusable UI components
 │   ├── transaction_card.dart
 │   ├── goal_card.dart
-│   ├── category_selector.dart
 │   └── ...                # Other UI components
 └── utils/                 # Utility functions
 ```
@@ -137,20 +153,34 @@ Using Ollama with Llama 2 model:
 - Offers budget optimization suggestions
 - Answers specific financial questions
 
+### Category Management
+- Create and manage custom categories
+- Assign colors and icons to categories
+- Export/import category configurations
+- Backup all financial data
+
+### Analytics & Reporting
+- Visual spending analysis with charts
+- Category breakdown of expenses
+- Daily spending trends
+- Export data for backup or further analysis
+
 ## Data Storage
 
 All financial data is stored locally using SQLite:
 - Transactions table: Stores all parsed transactions
 - Goals table: Tracks savings goals and progress
+- Categories table: Custom category definitions
 - No data is sent to external servers (except optional AI queries to your local Ollama instance)
 
 ## Customization
 
 ### Adding Custom Categories
-1. Go to any transaction
-2. Tap to edit category
-3. Select "Add New Category"
-4. Enter your custom category name
+1. Go to Settings > Manage Categories
+2. Tap "Add New Category"
+3. Enter your custom category name
+4. Optionally specify an icon and color
+5. Tap "Add Category" to save
 
 ### Adjusting AI Sensitivity
 The AI service in `lib/services/ai_service.dart` can be adjusted:
@@ -167,7 +197,14 @@ flutter test
 
 ### Building for Release
 ```bash
+# Android
 flutter build apk --release
+
+# iOS
+flutter build ios --release
+
+# Web
+flutter build web
 ```
 
 ## Contributing
@@ -189,7 +226,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [Llama 2](https://ai.meta.com/llama/) - AI model
 - [SQLite](https://www.sqlite.org/) - Local database
 - [sqflite](https://pub.dev/packages/sqflite) - Flutter SQLite plugin
+- [charts_flutter](https://pub.dev/packages/charts_flutter) - Charting library
 
 ---
-
-Built with ❤️ for better financial management.

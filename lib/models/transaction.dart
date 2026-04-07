@@ -3,8 +3,8 @@ import 'dart:convert';
 class Transaction {
   final String id;
   final double amount;
-  final String type; // 'credit' or 'debit'
-  final String category;
+  final String type;
+  String category;
   final String description;
   final DateTime date;
   final String sender;

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:thangu/services/export_service.dart';
 import '../app_theme.dart';
 import '../services/ai_service.dart';
+import 'category_management_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -37,6 +39,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     'gpt-4o'
   ];
 
+  final ExportService _exportService = ExportService();
+
   @override
   void initState() {
     super.initState();
@@ -46,8 +50,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
-      _aiBaseUrl =
-          prefs.getString('ai_base_url') ?? AiService.defaultOllamaUrl;
+      _aiBaseUrl = prefs.getString('ai_base_url') ?? AiService.defaultOllamaUrl;
       _aiModel = prefs.getString('ai_model') ?? 'llama2';
       _aiApiKey = prefs.getString('ai_api_key') ?? '';
       _isOllama = prefs.getBool('ai_is_ollama') ?? true;
@@ -76,6 +79,70 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _exportData() async {
+    try {
+      final json = await _exportService.exportToJson();
+      final fileName =
+          'thangu_backup_${DateTime.now().millisecondsSinceEpoch}.json';
+      final filePath = await _exportService.saveExportFile(json, fileName);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Data exported to: $filePath'),
+            backgroundColor: AppTheme.primaryDark,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Export failed: $e'),
+            backgroundColor: AppTheme.accentRed,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _importData() async {
+    // Show file picker dialog or explanation
+    if (mounted) {
+      final result = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Import Data'),
+          content: const Text(
+              'To import data, place your backup JSON file in the app documents directory and restart the app.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('I Understand'),
+            ),
+          ],
+        ),
+      );
+
+      // In a real implementation, you would handle the actual file import here
+      // This is a simplified version for demonstration
+      if (result == true) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Import functionality would be implemented here'),
+              backgroundColor: AppTheme.primaryDark,
+            ),
+          );
+        }
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -96,9 +163,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               icon: Icons.psychology_rounded,
               iconColor: AppTheme.primaryLight,
               title: 'Use Ollama',
-              subtitle: _isOllama
-                  ? 'Local AI via Ollama'
-                  : 'OpenAI-compatible API',
+              subtitle:
+                  _isOllama ? 'Local AI via Ollama' : 'OpenAI-compatible API',
               value: _isOllama,
               onChanged: (v) => setState(() => _isOllama = v),
             ),
@@ -141,8 +207,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               title: 'Notifications',
               subtitle: 'Transaction alerts & insights',
               value: _notificationsEnabled,
-              onChanged: (v) =>
-                  setState(() => _notificationsEnabled = v),
+              onChanged: (v) => setState(() => _notificationsEnabled = v),
             ),
             _buildDivider(),
             _buildSwitchRow(
@@ -162,17 +227,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
               icon: Icons.money_off_rounded,
               iconColor: AppTheme.accentOrange,
               title: 'Alert Threshold',
-              subtitle:
-                  'Notify above \$${_transactionAlertThreshold.toInt()}',
+              subtitle: 'Notify above \$${_transactionAlertThreshold.toInt()}',
               value: _transactionAlertThreshold,
               min: 10,
               max: 1000,
-              onChanged: (v) =>
-                  setState(() => _transactionAlertThreshold = v),
+              onChanged: (v) => setState(() => _transactionAlertThreshold = v),
+            ),
+            _buildDivider(),
+            _buildNavigationRow(
+              icon: Icons.category_rounded,
+              iconColor: AppTheme.primaryLight,
+              title: 'Manage Categories',
+              subtitle: 'Add or edit custom categories',
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const CategoryManagementScreen(),
+                ),
+              ),
             ),
           ]),
 
-          // ─── About ─────────────────────────────────────
+// ─── About ─────────────────────────────────────
           _buildSectionHeader('About'),
           _buildCard([
             _buildInfoRow(
@@ -187,6 +263,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
               iconColor: AppTheme.textTertiary,
               title: 'Version',
               subtitle: '1.0.0',
+            ),
+            _buildDivider(),
+            _buildNavigationRow(
+              icon: Icons.download_rounded,
+              iconColor: AppTheme.accentGreen,
+              title: 'Export Data',
+              subtitle: 'Backup your financial data',
+              onTap: _exportData,
+            ),
+            _buildDivider(),
+            _buildNavigationRow(
+              icon: Icons.upload_rounded,
+              iconColor: AppTheme.accent,
+              title: 'Import Data',
+              subtitle: 'Restore from backup',
+              onTap: _importData,
             ),
           ]),
 
@@ -203,8 +295,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ),
               child: const Text('Save Settings',
-                  style:
-                      TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             ),
           ),
           const SizedBox(height: 32),
@@ -474,6 +565,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildNavigationRow({
+    required IconData icon,
+    required Color iconColor,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: GestureDetector(
+        onTap: onTap,
+        child: Row(
+          children: [
+            _buildIconBox(icon, iconColor),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      style: const TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 2),
+                  Text(subtitle, style: AppTheme.caption),
+                ],
+              ),
+            ),
+            const Icon(Icons.arrow_forward_ios_rounded,
+                color: AppTheme.textTertiary, size: 16),
+          ],
+        ),
       ),
     );
   }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:thangu/services/real_sms_service.dart';
 import '../app_theme.dart';
 import '../models/transaction.dart';
 import '../services/database_service.dart';
@@ -17,6 +18,7 @@ class TransactionsScreen extends StatefulWidget {
 class _TransactionsScreenState extends State<TransactionsScreen> {
   final DatabaseService _dbService = DatabaseService();
   final AiService _aiService = AiService();
+  final RealSmsService _smsService = RealSmsService();
   List<Transaction> _transactions = [];
   List<Transaction> _filteredTransactions = [];
   bool _isLoading = true;
@@ -51,8 +53,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
 
   void _applyFilters() {
     _filteredTransactions = _transactions.where((txn) {
-      final matchesType =
-          _filterType == 'all' || txn.type == _filterType;
+      final matchesType = _filterType == 'all' || txn.type == _filterType;
       final matchesSearch = _searchQuery.isEmpty ||
           txn.description.toLowerCase().contains(_searchQuery.toLowerCase()) ||
           txn.category.toLowerCase().contains(_searchQuery.toLowerCase());
@@ -84,8 +85,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
       await _dbService.updateTransaction(updatedTransaction);
       if (mounted) {
         setState(() {
-          final index =
-              _transactions.indexWhere((t) => t.id == transaction.id);
+          final index = _transactions.indexWhere((t) => t.id == transaction.id);
           if (index != -1) _transactions[index] = updatedTransaction;
           _applyFilters();
         });

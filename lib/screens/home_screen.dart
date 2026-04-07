@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:thangu/screens/analytics_screen.dart';
 import '../app_theme.dart';
 import '../services/database_service.dart';
 import '../models/transaction.dart' as app_txn;
@@ -180,8 +181,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('Welcome back 👋',
-                  style: TextStyle(
-                      color: AppTheme.textSecondary, fontSize: 13)),
+                  style:
+                      TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
               SizedBox(height: 2),
               Text('Thangu',
                   style: TextStyle(
@@ -305,8 +306,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(label,
-                      style: const TextStyle(
-                          color: Colors.white60, fontSize: 11)),
+                      style:
+                          const TextStyle(color: Colors.white60, fontSize: 11)),
                   const SizedBox(height: 2),
                   Text(amount,
                       style: const TextStyle(
@@ -378,9 +379,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             const SizedBox(height: 8),
             Text(value,
                 style: TextStyle(
-                    color: color,
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold)),
+                    color: color, fontSize: 16, fontWeight: FontWeight.bold)),
             const SizedBox(height: 2),
             Text(label, style: AppTheme.caption),
           ],
@@ -417,6 +416,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               AppTheme.primaryLight,
               () => _navigateTo(const AiChatScreen()),
             ),
+            _buildActionItem(
+              Icons.analytics_rounded,
+              'Analytics',
+              AppTheme.accentOrange,
+              () => _navigateTo(const AnalyticsScreen()),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
             _buildActionItem(
               Icons.settings_rounded,
               'Settings',
@@ -541,7 +552,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      txn.description.isNotEmpty ? txn.description : 'Transaction',
+                      txn.description.isNotEmpty
+                          ? txn.description
+                          : 'Transaction',
                       style: const TextStyle(
                           color: AppTheme.textPrimary,
                           fontSize: 14,
@@ -567,8 +580,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           if (!isLast)
             Padding(
               padding: const EdgeInsets.only(top: 14, left: 56),
-              child: Divider(
-                  height: 1, color: Colors.white.withOpacity(0.05)),
+              child: Divider(height: 1, color: Colors.white.withOpacity(0.05)),
             ),
         ],
       ),
@@ -590,8 +602,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               Text('No savings goals yet',
                   style: TextStyle(color: AppTheme.textSecondary)),
               SizedBox(height: 4),
-              Text('Tap + to create your first goal',
-                  style: AppTheme.caption),
+              Text('Tap + to create your first goal', style: AppTheme.caption),
             ],
           ),
         ),
@@ -685,8 +696,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 color: Colors.white.withOpacity(0.2),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: const Icon(Icons.auto_awesome,
-                  color: Colors.white, size: 24),
+              child:
+                  const Icon(Icons.auto_awesome, color: Colors.white, size: 24),
             ),
             const SizedBox(width: 16),
             const Expanded(
