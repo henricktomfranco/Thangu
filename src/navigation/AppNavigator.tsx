@@ -9,6 +9,7 @@ import DashboardScreen from './screens/DashboardScreen';
 import TransactionsScreen from './screens/TransactionsScreen';
 import CategoriesScreen from './screens/CategoriesScreen';
 import SettingsScreen from './screens/SettingsScreen';
+import BudgetScreen from './screens/BudgetScreen';
 
 const Tab = createBottomTabNavigator();
 
@@ -73,11 +74,16 @@ export default function AppNavigator() {
             component={CategoriesScreen}
             options={{ title: 'Categories' }}
           />
-          <Tab.Screen
-            name="Settings"
-            component={SettingsScreen}
-            options={{ headerShown: false }}
-          />
+           <Tab.Screen
+             name="Settings"
+             component={SettingsScreen}
+             options={{ headerShown: false }}
+           />
+           <Tab.Screen
+             name="Budget"
+             component={BudgetScreen}
+             options={{ title: 'Budget' }}
+           />
         </Tab.Navigator>
       </NavigationContainer>
     </PaperProvider>

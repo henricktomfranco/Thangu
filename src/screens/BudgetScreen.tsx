@@ -174,31 +174,30 @@ export default function BudgetScreen({ navigation }: any) {
                       <View 
                         style={[
                           styles.progressBar, 
-                          styles.progressNormal
+                          styles.progressNormal,
+                          { width: '50%' }
                         ]}
-                        style={{ width: '50%' }}
                       />
                     </View>
                     
                     <View style={styles.budgetActions}>
                       <IconButton
-                        icon="edit"
+                        icon="pencil"
                         onPress={() => 
                           navigation.navigate('EditBudgetScreen', { 
                             budgetId: item.id 
                           })
                         }
                         size={24}
-                        color="#6200ee"
+                        iconColor="#6200ee"
                       />
                       <IconButton
                         icon="delete"
                         onPress={() => {
-                          // Simple alert for now
                           alert('Delete budget functionality would go here');
                         }}
                         size={24}
-                        color="#dc3545"
+                        iconColor="#dc3545"
                       />
                     </View>
                   </View>
