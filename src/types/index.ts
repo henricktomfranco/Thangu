@@ -59,3 +59,30 @@ export interface CategorySummary {
   total: number;
   percentage: number;
 }
+
+// Budget Types
+export interface Budget {
+  id: number;
+  category_id: number;
+  amount: number;
+  month: string; // Format: YYYY-MM
+  currency: string;
+  created_at: string;
+  updated_at: string;
+  category_name?: string;
+  category_color?: string;
+}
+
+// Savings Goal Types
+export interface SavingsGoal {
+  id: number;
+  name: string;
+  target_amount: number;
+  current_amount: number;
+  currency: string;
+  target_date: string; // ISO date string
+  monthly_contribution: number;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
