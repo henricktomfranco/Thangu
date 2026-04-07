@@ -95,6 +95,20 @@ lib/
 └── utils/                 # Utility functions
 ```
 
+## AI Configuration
+
+The app supports both Ollama (local AI) and OpenAI compatible APIs:
+
+1. **Ollama Setup**:
+   - Install Ollama from https://ollama.ai
+   - Pull a model: `ollama pull llama2` (or mistral, etc.)
+   - Default endpoint: http://127.0.0.1:11434
+
+2. **OpenAI Compatible APIs**:
+   - Set your API endpoint in Settings
+   - Add your API key for authentication
+   - Choose from supported models
+
 ## Features in Detail
 
 ### SMS Transaction Processing
