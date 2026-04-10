@@ -104,31 +104,20 @@ class _AiChatScreenState extends State<AiChatScreen>
     _scrollToBottom();
 
     try {
-      final transactions = await _dbService.getTransactions(limit: 50);
-      double monthlyIncome = 0, monthlyExpenses = 0;
-      final now = DateTime.now();
-      final startOfMonth = DateTime(now.year, now.month, 1);
+      final prompt = '''
+      You are Thangu, a friendly and helpful AI finance assistant. The user asked: "$text"
+      
+      Be helpful, concise, and friendly in your response. If the question is about finances, provide specific advice based on the data available.
+      ''';
 
-      for (final txn in transactions) {
-        if (txn.date.isAfter(startOfMonth)) {
-          if (txn.type == 'credit') {
-            monthlyIncome += txn.amount;
-          } else {
-            monthlyExpenses += txn.amount;
-          }
-        }
-      }
-
-      final response = await _aiService.getFinancialAdvice(
-        monthlyIncome: monthlyIncome,
-        monthlyExpenses: monthlyExpenses,
-        recentTransactions: transactions,
-      );
+      final response = await _aiService.generateResponse(prompt);
 
       if (mounted) {
         setState(() {
           _messages.add({
-            'text': response,
+            'text': response.isNotEmpty
+                ? response
+                : "I'm here to help! Ask me anything about your finances.",
             'isUser': false,
             'timestamp': DateTime.now(),
           });
@@ -181,17 +170,19 @@ class _AiChatScreenState extends State<AiChatScreen>
                 gradient: AppTheme.primaryGradient,
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Icon(Icons.auto_awesome,
-                  color: Colors.white, size: 18),
+              child:
+                  const Icon(Icons.auto_awesome, color: Colors.white, size: 18),
             ),
             const SizedBox(width: 12),
             const Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('Thangu AI',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    style:
+                        TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                 Text('Financial Assistant',
-                    style: TextStyle(fontSize: 11, color: AppTheme.textTertiary)),
+                    style:
+                        TextStyle(fontSize: 11, color: AppTheme.textTertiary)),
               ],
             ),
           ],
@@ -203,8 +194,7 @@ class _AiChatScreenState extends State<AiChatScreen>
           Expanded(
             child: _isLoading && !_isInitialized
                 ? const Center(
-                    child:
-                        CircularProgressIndicator(color: AppTheme.primary))
+                    child: CircularProgressIndicator(color: AppTheme.primary))
                 : _messages.isEmpty
                     ? _buildWelcome()
                     : ListView.builder(
@@ -272,9 +262,8 @@ class _AiChatScreenState extends State<AiChatScreen>
         margin: const EdgeInsets.only(bottom: 10),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
-          color: isUser
-              ? AppTheme.primary.withOpacity(0.2)
-              : AppTheme.surfaceCard,
+          color:
+              isUser ? AppTheme.primary.withOpacity(0.2) : AppTheme.surfaceCard,
           borderRadius: BorderRadius.only(
             topLeft: Radius.circular(isUser ? 16 : 4),
             topRight: Radius.circular(isUser ? 4 : 16),
@@ -294,8 +283,7 @@ class _AiChatScreenState extends State<AiChatScreen>
               text,
               style: TextStyle(
                 fontSize: 14,
-                color:
-                    isUser ? AppTheme.textPrimary : AppTheme.textPrimary,
+                color: isUser ? AppTheme.textPrimary : AppTheme.textPrimary,
                 height: 1.4,
               ),
             ),

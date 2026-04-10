@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:thangu/models/transaction.dart';
+import 'package:thangu/services/proactive_ai_service.dart';
 import 'package:thangu/services/database_service.dart';
 import 'package:thangu/services/ai_service.dart';
 
@@ -18,6 +19,7 @@ class EnhancedSmsService {
 
   final DatabaseService _dbService = DatabaseService();
   final AiService _aiService = AiService();
+  final ProactiveAiService _proactiveAiService = ProactiveAiService();
 
   // Bank SMS patterns for better extraction
   static final Map<String, RegExp> _bankPatterns = {
@@ -25,8 +27,11 @@ class EnhancedSmsService {
       r'(?:Rs\.?|INR|₹)\s*([0-9,]+\.?[0-9]*)',
       caseSensitive: false,
     ),
-    'account': RegExp(r'A/c\s*(?:No\.?|Number)?[:\s]?(\w+)', caseSensitive: false),
-    'refNo': RegExp(r'(?:Ref|Reference|Txn|Transaction)\s*(?:No\.?|ID)?[:\s]?(\w+)', caseSensitive: false),
+    'account':
+        RegExp(r'A/c\s*(?:No\.?|Number)?[:\s]?(\w+)', caseSensitive: false),
+    'refNo': RegExp(
+        r'(?:Ref|Reference|Txn|Transaction)\s*(?:No\.?|ID)?[:\s]?(\w+)',
+        caseSensitive: false),
   };
 
   bool _isListening = false;
@@ -77,6 +82,15 @@ class EnhancedSmsService {
 
       // Emit transaction for UI updates
       _transactionController.add(transaction);
+
+      // Proactive Savings Analysis
+      final history = await _dbService.getTransactions();
+      final nudge =
+          await _proactiveAiService.analyzeNewTransaction(transaction, history);
+      if (nudge != null) {
+        print('[ProactiveAi] Savings Nudge: $nudge');
+        // In a real app, this would trigger a push notification or an in-app alert
+      }
 
       print('[SmsService] Transaction saved: ${transaction.id}');
     } catch (e) {
@@ -163,7 +177,6 @@ class EnhancedSmsService {
     String cleaned = smsBody.replaceAll(
       RegExp(r'(OTP|PIN|CVV|ATM|Card|A/c|Account)[:\s]+[\w\d]+'),
       '[REDACTED]',
-      caseSensitive: false,
     );
 
     // Truncate to reasonable length
@@ -202,13 +215,16 @@ class EnhancedSmsService {
 
     if (description.contains('food') || description.contains('restaurant')) {
       return 'Food & Dining';
-    } else if (description.contains('grocery') || description.contains('supermarket')) {
+    } else if (description.contains('grocery') ||
+        description.contains('supermarket')) {
       return 'Groceries';
     } else if (description.contains('fuel') || description.contains('petrol')) {
       return 'Transportation';
-    } else if (description.contains('hospital') || description.contains('medical')) {
+    } else if (description.contains('hospital') ||
+        description.contains('medical')) {
       return 'Healthcare';
-    } else if (description.contains('movie') || description.contains('entertainment')) {
+    } else if (description.contains('movie') ||
+        description.contains('entertainment')) {
       return 'Entertainment';
     } else if (transaction.type == 'credit') {
       return 'Income';

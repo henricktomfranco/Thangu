@@ -107,6 +107,66 @@ class AiService {
     }
   }
 
+  /// Fetch available models from configured server
+  /// Returns list of model names, empty list if connection fails
+  Future<List<String>> fetchAvailableModels(String serverUrl, {bool isOllama = true, String? apiKey}) async {
+    try {
+      String modelsUrl;
+      if (isOllama) {
+        modelsUrl = '$serverUrl/api/tags';
+      } else {
+        modelsUrl = '$serverUrl/v1/models';
+      }
+
+      final headers = <String, String>{'Content-Type': 'application/json'};
+      if (apiKey != null && apiKey.isNotEmpty) {
+        headers['Authorization'] = 'Bearer $apiKey';
+      }
+
+      final response = await http.get(
+        Uri.parse(modelsUrl),
+        headers: headers,
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> responseData = json.decode(response.body);
+        final List<String> models = [];
+
+        if (isOllama) {
+          // Ollama response format: {"models": [{"name": "llama2", ...}, ...]}
+          final modelsList = responseData['models'] as List?;
+          if (modelsList != null) {
+            for (final model in modelsList) {
+              final modelName = model['name'] as String?;
+              if (modelName != null) {
+                models.add(modelName);
+              }
+            }
+          }
+        } else {
+          // OpenAI response format: {"data": [{"id": "gpt-4", ...}, ...]}
+          final dataList = responseData['data'] as List?;
+          if (dataList != null) {
+            for (final model in dataList) {
+              final modelId = model['id'] as String?;
+              if (modelId != null) {
+                models.add(modelId);
+              }
+            }
+          }
+        }
+
+        return models.isNotEmpty ? models : [];
+      } else {
+        print('[AiService] Failed to fetch models: ${response.statusCode}');
+        return [];
+      }
+    } catch (e) {
+      print('[AiService] Error fetching models: $e');
+      return [];
+    }
+  }
+
   String _buildCategorizationPrompt(Transaction transaction) {
     return '''
 You are Thangu, an AI financial assistant. Categorize this transaction based on the merchant name and transaction details.

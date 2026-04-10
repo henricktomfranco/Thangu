@@ -89,9 +89,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final isNegative = amount < 0;
     final abs = amount.abs();
     if (abs >= 1000) {
-      return '${isNegative ? '-' : ''}\$${(abs / 1000).toStringAsFixed(1)}k';
+      return '${isNegative ? '-' : ''}QAR${(abs / 1000).toStringAsFixed(1)}k';
     }
-    return '${isNegative ? '-' : ''}\$${abs.toStringAsFixed(2)}';
+    return '${isNegative ? '-' : ''}QAR${abs.toStringAsFixed(2)}';
   }
 
   void _navigateTo(Widget screen) {
@@ -246,7 +246,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           ),
           const SizedBox(height: 16),
           Text(
-            '\$${_totalBalance.toStringAsFixed(2)}',
+            'QAR${_totalBalance.toStringAsFixed(2)}',
             style: const TextStyle(
               color: Colors.white,
               fontSize: 38,
@@ -568,7 +568,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 ),
               ),
               Text(
-                '${isCredit ? '+' : '-'}\$${txn.amount.toStringAsFixed(2)}',
+                '${isCredit ? '+' : '-'}QAR${txn.amount.toStringAsFixed(2)}',
                 style: TextStyle(
                   color: isCredit ? AppTheme.income : AppTheme.expense,
                   fontSize: 15,
@@ -647,7 +647,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                 fontWeight: FontWeight.w600)),
                         const SizedBox(height: 3),
                         Text(
-                          '\$${goal.currentAmount.toStringAsFixed(0)} / \$${goal.targetAmount.toStringAsFixed(0)}',
+                          'QAR${goal.currentAmount.toStringAsFixed(0)} / QAR${goal.targetAmount.toStringAsFixed(0)}',
                           style: AppTheme.caption,
                         ),
                       ],

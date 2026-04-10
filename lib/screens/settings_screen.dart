@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:thangu/services/export_service.dart';
+import 'package:thangu/services/proactive_ai_service.dart';
 import '../app_theme.dart';
 import '../services/ai_service.dart';
 import 'category_management_screen.dart';
@@ -23,8 +24,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _notificationsEnabled = true;
   bool _biometricAuth = false;
   double _transactionAlertThreshold = 100.0;
+  int _savingAggression = 1;
 
-  final List<String> _ollamaModels = [
+  // Dynamic Models
+  List<String> _availableModels = [];
+  bool _isFetchingModels = false;
+  String? _modelsErrorMessage;
+
+  // Default fallback models
+  final List<String> _defaultOllamaModels = [
     'llama2',
     'mistral',
     'codellama',
@@ -32,7 +40,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     'mistral:7b'
   ];
 
-  final List<String> _openAiModels = [
+  final List<String> _defaultOpenAiModels = [
     'gpt-3.5-turbo',
     'gpt-4',
     'gpt-4-turbo',
@@ -40,11 +48,66 @@ class _SettingsScreenState extends State<SettingsScreen> {
   ];
 
   final ExportService _exportService = ExportService();
+  late AiService _aiService;
 
   @override
   void initState() {
     super.initState();
+    _aiService = AiService();
     _loadSettings();
+    // Fetch available models when screen loads
+    _fetchAvailableModels();
+  }
+
+  /// Fetch available models from the configured server
+  Future<void> _fetchAvailableModels() async {
+    if (_aiBaseUrl.isEmpty) {
+      setState(() {
+        _modelsErrorMessage = 'Please enter a server address';
+      });
+      return;
+    }
+
+    setState(() {
+      _isFetchingModels = true;
+      _modelsErrorMessage = null;
+    });
+
+    try {
+      final models = await _aiService.fetchAvailableModels(
+        _aiBaseUrl,
+        isOllama: _isOllama,
+        apiKey: _aiApiKey.isNotEmpty ? _aiApiKey : null,
+      );
+
+      if (mounted) {
+        setState(() {
+          if (models.isNotEmpty) {
+            _availableModels = models;
+            // If current model is not in the list, select the first one
+            if (!models.contains(_aiModel)) {
+              _aiModel = models.first;
+            }
+            _modelsErrorMessage = null;
+          } else {
+            // If no models found, use defaults and show message
+            _availableModels =
+                _isOllama ? _defaultOllamaModels : _defaultOpenAiModels;
+            _modelsErrorMessage = 'No models found. Using default list.';
+          }
+          _isFetchingModels = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _availableModels =
+              _isOllama ? _defaultOllamaModels : _defaultOpenAiModels;
+          _modelsErrorMessage = 'Connection failed. Using default models.';
+          _isFetchingModels = false;
+        });
+      }
+    }
   }
 
   Future<void> _loadSettings() async {
@@ -58,6 +121,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _biometricAuth = prefs.getBool('biometric_auth') ?? false;
       _transactionAlertThreshold =
           prefs.getDouble('transaction_alert_threshold') ?? 100.0;
+      _savingAggression = prefs.getInt('saving_aggression') ?? 1;
+      // Initialize with default models
+      _availableModels =
+          _isOllama ? _defaultOllamaModels : _defaultOpenAiModels;
     });
   }
 
@@ -71,6 +138,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await prefs.setBool('biometric_auth', _biometricAuth);
     await prefs.setDouble(
         'transaction_alert_threshold', _transactionAlertThreshold);
+    await prefs.setInt('saving_aggression', _savingAggression);
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -166,15 +234,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
               subtitle:
                   _isOllama ? 'Local AI via Ollama' : 'OpenAI-compatible API',
               value: _isOllama,
-              onChanged: (v) => setState(() => _isOllama = v),
+              onChanged: (v) {
+                setState(() => _isOllama = v);
+                // Reset models to defaults when switching
+                setState(() {
+                  _availableModels =
+                      _isOllama ? _defaultOllamaModels : _defaultOpenAiModels;
+                  _aiModel = _availableModels.first;
+                  _modelsErrorMessage = null;
+                });
+              },
             ),
             _buildDivider(),
-            _buildEditableRow(
+            _buildEditableRowWithButton(
               icon: Icons.language_rounded,
               iconColor: AppTheme.accent,
               title: 'API Endpoint',
               value: _aiBaseUrl,
               onChanged: (v) => _aiBaseUrl = v,
+              buttonLabel: 'Fetch',
+              isLoading: _isFetchingModels,
+              onButtonPressed: _fetchAvailableModels,
             ),
             _buildDivider(),
             _buildEditableRow(
@@ -191,11 +271,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
               iconColor: AppTheme.accentGreen,
               title: 'Model',
               value: _aiModel,
-              items: _isOllama ? _ollamaModels : _openAiModels,
+              items: _availableModels.isNotEmpty
+                  ? _availableModels
+                  : (_isOllama ? _defaultOllamaModels : _defaultOpenAiModels),
               onChanged: (v) {
                 if (v != null) setState(() => _aiModel = v);
               },
             ),
+            if (_modelsErrorMessage != null) ...[
+              _buildDivider(),
+              Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                child: Row(
+                  children: [
+                    const Icon(Icons.info_outline_rounded,
+                        color: AppTheme.accentOrange, size: 20),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        _modelsErrorMessage!,
+                        style: const TextStyle(
+                          color: AppTheme.accentOrange,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ]),
 
           // ─── Privacy & Notifications ────────────────────
@@ -220,14 +325,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ]),
 
-          // ─── Transaction Settings ───────────────────────
+// ─── Transaction Settings ───────────────────────
           _buildSectionHeader('Transaction Settings'),
           _buildCard([
             _buildSliderRow(
               icon: Icons.money_off_rounded,
               iconColor: AppTheme.accentOrange,
               title: 'Alert Threshold',
-              subtitle: 'Notify above \$${_transactionAlertThreshold.toInt()}',
+              subtitle: 'Notify above QAR${_transactionAlertThreshold.toInt()}',
               value: _transactionAlertThreshold,
               min: 10,
               max: 1000,
@@ -246,6 +351,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ),
             ),
+          ]),
+
+          // ─── Proactive Coach ───────────────────────────
+          _buildSectionHeader('Proactive Coach'),
+          _buildCard([
+            _buildSavingAggressionRow(),
           ]),
 
 // ─── About ─────────────────────────────────────
@@ -438,6 +549,93 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  Widget _buildEditableRowWithButton({
+    required IconData icon,
+    required Color iconColor,
+    required String title,
+    required String value,
+    required ValueChanged<String> onChanged,
+    required String buttonLabel,
+    required bool isLoading,
+    required VoidCallback onButtonPressed,
+    bool isPassword = false,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      child: Row(
+        children: [
+          _buildIconBox(icon, iconColor),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    style: const TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600)),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Expanded(
+                      child: SizedBox(
+                        height: 36,
+                        child: TextField(
+                          controller: TextEditingController(text: value),
+                          onChanged: onChanged,
+                          obscureText: isPassword,
+                          style: const TextStyle(
+                              color: AppTheme.textSecondary, fontSize: 13),
+                          decoration: InputDecoration(
+                            isDense: true,
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 8),
+                            fillColor: AppTheme.surfaceInput,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: BorderSide.none,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    SizedBox(
+                      height: 36,
+                      child: ElevatedButton(
+                        onPressed: isLoading ? null : onButtonPressed,
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          backgroundColor: AppTheme.primary,
+                          disabledBackgroundColor:
+                              AppTheme.primary.withOpacity(0.5),
+                        ),
+                        child: isLoading
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                      Colors.white),
+                                ),
+                              )
+                            : Text(buttonLabel,
+                                style: const TextStyle(
+                                    fontSize: 12, fontWeight: FontWeight.w600)),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildDropdownRow({
     required IconData icon,
     required Color iconColor,
@@ -481,6 +679,92 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildSavingAggressionRow() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              _buildIconBox(Icons.trending_up_rounded, AppTheme.accentGreen),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Saving Aggression',
+                        style: TextStyle(
+                            color: AppTheme.textPrimary,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 2),
+                    Text(
+                      _savingAggression == 0
+                          ? 'Only critical alerts'
+                          : _savingAggression == 1
+                              ? 'Weekly insights and alerts'
+                              : 'Daily nudges and strict monitoring',
+                      style: AppTheme.caption,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _aggressionButton(0, 'Low', Icons.warning_amber_rounded),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child:
+                    _aggressionButton(1, 'Medium', Icons.notifications_rounded),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _aggressionButton(2, 'High', Icons.alarm_rounded),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _aggressionButton(int index, String label, IconData icon) {
+    final isSelected = _savingAggression == index;
+    return GestureDetector(
+      onTap: () => setState(() => _savingAggression = index),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: isSelected ? AppTheme.primary : AppTheme.surfaceInput,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: isSelected ? AppTheme.primary : Colors.transparent,
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon,
+                size: 16,
+                color: isSelected ? Colors.white : AppTheme.textTertiary),
+            const SizedBox(width: 4),
+            Text(label,
+                style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: isSelected ? Colors.white : AppTheme.textTertiary)),
+          ],
+        ),
       ),
     );
   }
@@ -531,7 +815,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               min: min,
               max: max,
               divisions: 10,
-              label: '\$${value.toInt()}',
+              label: 'QAR${value.toInt()}',
               onChanged: onChanged,
             ),
           ),
