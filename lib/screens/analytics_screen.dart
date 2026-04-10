@@ -213,7 +213,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             Expanded(
               child: _buildStatCard(
                 title: 'Income',
-                value: '\$${_totalIncome.toStringAsFixed(2)}',
+                value: 'QAR${_totalIncome.toStringAsFixed(2)}',
                 color: AppTheme.income,
                 icon: Icons.trending_up_rounded,
               ),
@@ -222,7 +222,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             Expanded(
               child: _buildStatCard(
                 title: 'Expenses',
-                value: '\$${_totalExpenses.toStringAsFixed(2)}',
+                value: 'QAR${_totalExpenses.toStringAsFixed(2)}',
                 color: AppTheme.expense,
                 icon: Icons.trending_down_rounded,
               ),
@@ -232,7 +232,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         const SizedBox(height: 12),
         _buildStatCard(
           title: 'Net Savings',
-          value: '\$${_netSavings.toStringAsFixed(2)}',
+          value: 'QAR${_netSavings.toStringAsFixed(2)}',
           color: _netSavings >= 0 ? AppTheme.income : AppTheme.expense,
           icon: Icons.account_balance_wallet_rounded,
         ),
@@ -425,7 +425,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
               ],
             ),
           ),
-          Text('\$${amount.toStringAsFixed(2)}',
+          Text('QAR${amount.toStringAsFixed(2)}',
               style: const TextStyle(
                   color: AppTheme.textPrimary, fontWeight: FontWeight.w600)),
         ],
@@ -494,7 +494,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
               ],
             ),
           ),
-          Text('\$${txn.amount.toStringAsFixed(2)}',
+          Text('QAR${txn.amount.toStringAsFixed(2)}',
               style: const TextStyle(
                   color: AppTheme.expense, fontWeight: FontWeight.w600)),
         ],

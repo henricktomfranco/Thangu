@@ -109,7 +109,8 @@ class AiService {
 
   /// Fetch available models from configured server
   /// Returns list of model names, empty list if connection fails
-  Future<List<String>> fetchAvailableModels(String serverUrl, {bool isOllama = true, String? apiKey}) async {
+  Future<List<String>> fetchAvailableModels(String serverUrl,
+      {bool isOllama = true, String? apiKey}) async {
     try {
       String modelsUrl;
       if (isOllama) {
@@ -123,10 +124,12 @@ class AiService {
         headers['Authorization'] = 'Bearer $apiKey';
       }
 
-      final response = await http.get(
-        Uri.parse(modelsUrl),
-        headers: headers,
-      ).timeout(const Duration(seconds: 10));
+      final response = await http
+          .get(
+            Uri.parse(modelsUrl),
+            headers: headers,
+          )
+          .timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
         final Map<String, dynamic> responseData = json.decode(response.body);
@@ -256,15 +259,17 @@ Category:''';
       final headers = _buildHeaders();
       final body = _buildRequestBody(prompt);
 
-      final response = await http.post(
-        Uri.parse(url),
-        headers: headers,
-        body: json.encode(body),
-      ).timeout(const Duration(seconds: 10));
+      final response = await http
+          .post(
+            Uri.parse(url),
+            headers: headers,
+            body: json.encode(body),
+          )
+          .timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
         final Map<String, dynamic> responseData = json.decode(response.body);
-        
+
         if (_isOllama) {
           return responseData['response']?.toString().trim() ?? '';
         } else {
@@ -294,8 +299,8 @@ You are Thangu, a friendly and knowledgeable AI financial assistant.
 Provide helpful, personalized financial advice based on the user's financial situation.
 
 User's Financial Snapshot:
-- Monthly Income: \$${monthlyIncome.toStringAsFixed(2)}
-- Monthly Expenses: \$${monthlyExpenses.toStringAsFixed(2)}
+- Monthly Income: QAR${monthlyIncome.toStringAsFixed(2)}
+- Monthly Expenses: QAR${monthlyExpenses.toStringAsFixed(2)}
 - Savings Rate: ${((monthlyIncome - monthlyExpenses) / monthlyIncome * 100).toStringAsFixed(1)}%
 
 Recent Transaction Patterns:
@@ -345,7 +350,7 @@ Keep your response friendly, encouraging, and under 150 words.
 
     final StringBuffer buffer = StringBuffer();
     categoryTotals.forEach((category, amount) {
-      buffer.writeln('- $category: \$${amount.toStringAsFixed(2)}');
+      buffer.writeln('- $category: QAR${amount.toStringAsFixed(2)}');
     });
 
     return buffer.toString();

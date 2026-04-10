@@ -165,7 +165,7 @@ class _GoalsScreenState extends State<GoalsScreen> {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
-                '\$${totalSaved.toStringAsFixed(0)}',
+                'QAR${totalSaved.toStringAsFixed(0)}',
                 style: const TextStyle(
                     color: Colors.white,
                     fontSize: 32,
@@ -175,9 +175,8 @@ class _GoalsScreenState extends State<GoalsScreen> {
               Padding(
                 padding: const EdgeInsets.only(bottom: 4),
                 child: Text(
-                  'of \$${totalTarget.toStringAsFixed(0)}',
-                  style:
-                      const TextStyle(color: Colors.white60, fontSize: 14),
+                  'of QAR${totalTarget.toStringAsFixed(0)}',
+                  style: const TextStyle(color: Colors.white60, fontSize: 14),
                 ),
               ),
               const Spacer(),
@@ -204,16 +203,14 @@ class _GoalsScreenState extends State<GoalsScreen> {
             child: LinearProgressIndicator(
               value: progress,
               backgroundColor: Colors.white.withOpacity(0.15),
-              valueColor:
-                  const AlwaysStoppedAnimation<Color>(Colors.white),
+              valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
               minHeight: 6,
             ),
           ),
           const SizedBox(height: 8),
           Text(
             '${_goals.length} goal${_goals.length == 1 ? '' : 's'}',
-            style:
-                const TextStyle(color: Colors.white60, fontSize: 12),
+            style: const TextStyle(color: Colors.white60, fontSize: 12),
           ),
         ],
       ),
@@ -339,8 +336,7 @@ class _GoalFormState extends State<GoalForm> {
                 onPressed: _saveGoal,
                 child: const Text('Save',
                     style: TextStyle(
-                        color: AppTheme.primary,
-                        fontWeight: FontWeight.bold)),
+                        color: AppTheme.primary, fontWeight: FontWeight.bold)),
               ),
             ],
           ),
@@ -401,10 +397,9 @@ class _GoalFormState extends State<GoalForm> {
                           horizontal: 16, vertical: 16),
                       decoration: BoxDecoration(
                         color: AppTheme.surfaceInput,
-                        borderRadius:
-                            BorderRadius.circular(AppTheme.radiusMd),
-                        border: Border.all(
-                            color: Colors.white.withOpacity(0.06)),
+                        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+                        border:
+                            Border.all(color: Colors.white.withOpacity(0.06)),
                       ),
                       child: Row(
                         children: [
@@ -432,8 +427,7 @@ class _GoalFormState extends State<GoalForm> {
                     children: _categories.map((cat) {
                       final isSelected = _selectedCategory == cat;
                       return GestureDetector(
-                        onTap: () =>
-                            setState(() => _selectedCategory = cat),
+                        onTap: () => setState(() => _selectedCategory = cat),
                         child: AnimatedContainer(
                           duration: const Duration(milliseconds: 200),
                           padding: const EdgeInsets.symmetric(

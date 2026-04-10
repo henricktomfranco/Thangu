@@ -59,7 +59,7 @@ class DatabaseService {
       CREATE TABLE $tableTransactions (
         $columnId TEXT PRIMARY KEY,
         $columnAmount REAL NOT NULL,
-        $columnCurrency TEXT NOT NULL DEFAULT 'INR',
+        $columnCurrency TEXT NOT NULL DEFAULT 'QAR',
         $columnType TEXT NOT NULL,
         $columnCategory TEXT NOT NULL,
         $columnDescription TEXT,
@@ -111,8 +111,7 @@ class DatabaseService {
 
     query += ' LIMIT $limit';
 
-    final List<Map<String, dynamic>> maps =
-        await db.rawQuery(query, whereArgs);
+    final List<Map<String, dynamic>> maps = await db.rawQuery(query, whereArgs);
     return List.generate(
         maps.length, (i) => app_transaction.Transaction.fromMap(maps[i]));
   }
