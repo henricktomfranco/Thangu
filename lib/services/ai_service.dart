@@ -180,6 +180,39 @@ Category:''';
     }
   }
 
+  /// General purpose AI response generator
+  Future<String> generateResponse(String prompt) async {
+    try {
+      final url = _buildApiUrl();
+      final headers = _buildHeaders();
+      final body = _buildRequestBody(prompt);
+
+      final response = await http.post(
+        Uri.parse(url),
+        headers: headers,
+        body: json.encode(body),
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> responseData = json.decode(response.body);
+        
+        if (_isOllama) {
+          return responseData['response']?.toString().trim() ?? '';
+        } else {
+          // OpenAI format
+          final choices = responseData['choices'] as List?;
+          if (choices != null && choices.isNotEmpty) {
+            return choices[0]['message']['content']?.toString().trim() ?? '';
+          }
+        }
+      }
+      throw Exception('Failed to get response: ${response.statusCode}');
+    } catch (e) {
+      print('[AiService] Error generating response: $e');
+      rethrow;
+    }
+  }
+
   // Method to get financial advice from Thangu AI
   Future<String> getFinancialAdvice({
     required double monthlyIncome,

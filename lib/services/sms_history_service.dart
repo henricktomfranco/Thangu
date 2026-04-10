@@ -77,6 +77,13 @@ class SmsHistoryService {
             continue;
           }
 
+          // Use AI to determine if this is a financial transaction
+          final isFinancial = await _isFinancialSms(body);
+          if (!isFinancial) {
+            print('[SmsHistory] ⊘ Skipped non-financial SMS from $sender: ${body.substring(0, min(body.length, 40))}...');
+            continue;
+          }
+
           // Check if already exists in database
           final existingTxn = await _dbService.getTransactions();
           final isDuplicate = existingTxn.any(
@@ -137,11 +144,13 @@ class SmsHistoryService {
     );
   }
 
-  /// Extract amount from SMS
+  /// Extract amount from SMS - supports multiple currency formats
   double _extractAmount(String smsBody) {
     try {
+      // Try to extract amount with currency prefix/suffix
+      // Supports: Rs./₹/INR, QAR, AED, SAR, USD, EUR, GBP, etc.
       final RegExp regExp = RegExp(
-        r'(?:Rs\.?|INR|₹)\s*([0-9,]+\.?[0-9]*)',
+        r'(?:Rs\.?|INR|₹|QAR|AED|SAR|USD|\$|EUR|€|GBP|£)\s*([0-9,]+\.?[0-9]*)',
         caseSensitive: false,
       );
       final Match? match = regExp.firstMatch(smsBody);
@@ -149,6 +158,19 @@ class SmsHistoryService {
         String amountStr = match.group(1) ?? '0';
         amountStr = amountStr.replaceAll(',', '');
         return double.parse(amountStr);
+      }
+
+      // Fallback: look for amount pattern alone (number followed by optional decimals)
+      final RegExp fallbackRegExp = RegExp(r'([0-9]{2,}(?:\.[0-9]{2})?)\b');
+      final Match? fallbackMatch = fallbackRegExp.firstMatch(smsBody);
+      if (fallbackMatch != null) {
+        String amountStr = fallbackMatch.group(1) ?? '0';
+        amountStr = amountStr.replaceAll(',', '');
+        final amount = double.parse(amountStr);
+        // Only accept if amount is reasonable (between 0.1 and 1,000,000)
+        if (amount > 0.1 && amount < 1000000) {
+          return amount;
+        }
       }
     } catch (e) {
       print('[SmsHistory] Error extracting amount: $e');
@@ -160,13 +182,28 @@ class SmsHistoryService {
   String _extractType(String smsBody) {
     final lowerBody = smsBody.toLowerCase();
 
+    // Check for credit/income indicators
     if (lowerBody.contains('credit') ||
         lowerBody.contains('deposited') ||
         lowerBody.contains('received') ||
-        lowerBody.contains('refund')) {
+        lowerBody.contains('refund') ||
+        lowerBody.contains('salary') ||
+        lowerBody.contains('transfer in')) {
       return 'credit';
     }
 
+    // Check for debit/expense indicators
+    if (lowerBody.contains('debit') ||
+        lowerBody.contains('was used for') ||
+        lowerBody.contains('spent') ||
+        lowerBody.contains('purchase') ||
+        lowerBody.contains('withdrawal') ||
+        lowerBody.contains('payment') ||
+        lowerBody.contains('transfer out')) {
+      return 'debit';
+    }
+
+    // Default to debit if uncertain
     return 'debit';
   }
 
@@ -208,7 +245,7 @@ class SmsHistoryService {
   String _getDefaultCategory(Transaction transaction) {
     final desc = transaction.description.toLowerCase();
 
-    if (desc.contains('food') || desc.contains('restaurant')) {
+    if (desc.contains('food') || desc.contains('restaurant') || desc.contains('mcdonalds')) {
       return 'Food & Dining';
     } else if (desc.contains('grocery')) {
       return 'Groceries';
@@ -221,6 +258,53 @@ class SmsHistoryService {
     }
 
     return 'Other';
+  }
+
+  /// Detect if SMS is a financial transaction using AI
+  Future<bool> _isFinancialSms(String smsBody) async {
+    // First, check for keyword patterns
+    final lowerBody = smsBody.toLowerCase();
+    
+    // Strong financial keywords
+    if (lowerBody.contains('debit card') ||
+        lowerBody.contains('credit card') ||
+        lowerBody.contains('was used for') ||
+        lowerBody.contains('balance') ||
+        lowerBody.contains('transaction') ||
+        lowerBody.contains('amount') ||
+        lowerBody.contains('credited') ||
+        lowerBody.contains('debited') ||
+        lowerBody.contains('payment') ||
+        lowerBody.contains('transfer') ||
+        lowerBody.contains('received') ||
+        lowerBody.contains('spent') ||
+        lowerBody.contains('purchase') ||
+        lowerBody.contains('withdrawal')) {
+      return true;
+    }
+
+    // Check for currency amounts
+    if (RegExp(r'(?:Rs\.?|INR|₹|QAR|AED|SAR|USD|\$|EUR|€|GBP|£)\s*[0-9]', caseSensitive: false).hasMatch(smsBody)) {
+      return true;
+    }
+
+    // If no strong keywords, try AI detection
+    try {
+      final prompt = '''Is this an SMS message about a financial transaction (bank, credit card, payment, transfer, etc.)?
+Message: "$smsBody"
+Reply with just "yes" or "no".''';
+      
+      final result = await _aiService.generateResponse(prompt);
+      final response = result.toLowerCase().trim();
+      
+      final isFinancial = response.contains('yes');
+      print('[SmsHistory] AI detection for financial SMS: $isFinancial');
+      return isFinancial;
+    } catch (e) {
+      print('[SmsHistory] AI detection failed, using keyword matching: $e');
+      // If AI fails, use keyword matching as fallback
+      return false;
+    }
   }
 }
 
