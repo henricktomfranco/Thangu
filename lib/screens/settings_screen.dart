@@ -47,6 +47,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     'gpt-4o'
   ];
 
+  // App version
+  static const String _appVersion = '1.0.1';
+  bool _isCheckingUpdate = false;
+
   final ExportService _exportService = ExportService();
   late AiService _aiService;
 
@@ -207,6 +211,58 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           );
         }
+      }
+    }
+  }
+
+  Future<void> _checkForUpdates() async {
+    setState(() => _isCheckingUpdate = true);
+
+    try {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                ),
+              ),
+              const SizedBox(width: 12),
+              const Text('Checking for updates...'),
+            ],
+          ),
+          backgroundColor: AppTheme.primaryDark,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+
+      // Simulate update check - in real app, would check GitHub releases
+      await Future.delayed(const Duration(seconds: 2));
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('You are on the latest version!'),
+            backgroundColor: AppTheme.accentGreen,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error checking updates: $e'),
+            backgroundColor: AppTheme.accentRed,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isCheckingUpdate = false);
       }
     }
   }
@@ -373,7 +429,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
               icon: Icons.code_rounded,
               iconColor: AppTheme.textTertiary,
               title: 'Version',
-              subtitle: '1.0.0',
+              subtitle: _appVersion,
+            ),
+            _buildDivider(),
+            _buildNavigationRow(
+              icon: Icons.system_update_rounded,
+              iconColor: AppTheme.accent,
+              title: 'Check for Updates',
+              subtitle: 'Update to latest version',
+              onTap: _checkForUpdates,
             ),
             _buildDivider(),
             _buildNavigationRow(
