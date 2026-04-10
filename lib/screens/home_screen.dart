@@ -21,9 +21,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   List<app_txn.Transaction> _recentTransactions = [];
   List<SavingsGoal> _goals = [];
-  double _totalBalance = 0;
-  double _monthlyIncome = 0;
-  double _monthlyExpenses = 0;
+  double _totalBalance = 0; // All-time cumulative balance
+  double _monthlyIncome = 0; // Current month income
+  double _monthlyExpenses = 0; // Current month expenses
+  double _monthlyBalance = 0; // Current month net (income - expenses)
   bool _isLoading = true;
   int _currentNavIndex = 0;
 
@@ -53,19 +54,30 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
     try {
-      final transactions = await _dbService.getTransactions(limit: 50);
+      final transactions = await _dbService.getTransactions(limit: 500);
       final goals = await _dbService.getGoals();
 
+      // Calculate all-time total balance
+      double totalBalance = 0;
+      // Calculate current month stats
       final now = DateTime.now();
       final startOfMonth = DateTime(now.year, now.month, 1);
-      double income = 0, expenses = 0;
+      double monthlyIncome = 0, monthlyExpenses = 0;
 
       for (final txn in transactions) {
+        // All-time balance
+        if (txn.type == 'credit') {
+          totalBalance += txn.amount;
+        } else {
+          totalBalance -= txn.amount;
+        }
+
+        // Monthly stats
         if (txn.date.isAfter(startOfMonth)) {
           if (txn.type == 'credit') {
-            income += txn.amount;
+            monthlyIncome += txn.amount;
           } else {
-            expenses += txn.amount;
+            monthlyExpenses += txn.amount;
           }
         }
       }
@@ -73,9 +85,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       setState(() {
         _recentTransactions = transactions.take(5).toList();
         _goals = goals;
-        _monthlyIncome = income;
-        _monthlyExpenses = expenses;
-        _totalBalance = income - expenses;
+        _totalBalance = totalBalance;
+        _monthlyIncome = monthlyIncome;
+        _monthlyExpenses = monthlyExpenses;
+        _monthlyBalance = monthlyIncome - monthlyExpenses;
         _isLoading = false;
       });
       _fadeController.forward();
@@ -271,6 +284,24 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 color: AppTheme.accentRed,
               ),
             ],
+          ),
+          const SizedBox(height: 12),
+          Center(
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                'Monthly Net: QAR${_monthlyBalance.toStringAsFixed(2)}',
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
           ),
         ],
       ),
