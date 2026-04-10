@@ -109,23 +109,32 @@ class AiService {
 
   String _buildCategorizationPrompt(Transaction transaction) {
     return '''
-You are Thangu, an AI financial assistant. Your task is to categorize financial transactions into predefined categories.
+You are Thangu, an AI financial assistant. Categorize this transaction based on the merchant name and transaction details.
 
 Transaction Details:
-- Amount: \$${transaction.amount}
+- Merchant/Description: "${transaction.description}"
+- Amount: ${transaction.amount}
 - Type: ${transaction.type}
-- Description: "${transaction.description}"
 - Sender: ${transaction.sender}
 
 Available Categories:
 ${_knownCategories.join(', ')}
 
 Instructions:
-1. Analyze the transaction based on the description, amount, and sender
-2. Choose the most appropriate category from the list above
-3. If unsure, select "Other"
-4. Respond with ONLY the category name, nothing else
-5. If the transaction is clearly income (salary, deposit, etc.), use "Income"
+1. Look at the merchant name and understand what type of business it is
+2. Match to the most appropriate category
+3. Be decisive - choose ONE category only
+4. If the merchant name is unclear, make your best guess
+5. Respond with ONLY the category name, nothing else
+6. If it's income (salary, bonus, refund), use "Income"
+7. If it's money movement (transfer, payment), use "Transfer"
+
+Examples:
+- "MCDONALDS" → Food & Dining
+- "CARREFOUR MALL" → Groceries
+- "UBER" → Transportation
+- "NETFLIX" → Entertainment
+- "SALARY DEPOSIT" → Income
 
 Category:''';
   }

@@ -128,6 +128,7 @@ class SmsHistoryService {
   }
 
   /// Parse SMS content into Transaction object
+  /// Now uses AI to better understand merchant and category
   Transaction _parseSms(String body, String sender, int timestamp) {
     final date = DateTime.fromMillisecondsSinceEpoch(timestamp);
 
@@ -135,13 +136,51 @@ class SmsHistoryService {
       id: DateTime.now().millisecondsSinceEpoch.toString() + '_hist',
       amount: _extractAmount(body),
       type: _extractType(body),
-      category: 'Pending',
-      description: _extractDescription(body),
+      category: 'Pending', // Will be updated by AI
+      description: _extractMerchantName(body), // Clean merchant name instead of raw SMS
       date: date,
       sender: _sanitizeSender(sender),
       isCategorizedByAI: false,
       aiConfidence: 0.0,
     );
+  }
+
+  /// Extract clean merchant name from SMS
+  /// E.g., "MCDONALDS OLD AIRPOR" from full transaction SMS
+  String _extractMerchantName(String smsBody) {
+    // Common patterns in SMS to extract merchant name
+    final patterns = [
+      RegExp(r'at\s+([A-Z\s\d]+?)(?:\sat\s|Balance:|Enquiry|$)', multiLine: true),
+      RegExp(r'used\s+for[^\s]+\s+(?:QAR|AED|SAR|INR|Rs\.?|USD|EUR|GBP|₹|€|£)[^\s]*\s+([A-Z\s\d]+?)(?:\sat\s|Balance:|Enquiry|$)'),
+      RegExp(r'([A-Z][A-Z\s\d]{3,50}?)(?:\sat\s|Balance:|Enquiry|$)'),
+    ];
+
+    for (final pattern in patterns) {
+      final match = pattern.firstMatch(smsBody);
+      if (match != null && match.groupCount > 0) {
+        String merchant = match.group(1)?.trim() ?? '';
+        if (merchant.isNotEmpty && merchant.length > 3) {
+          // Clean up common suffixes
+          merchant = merchant
+              .replaceAll(RegExp(r'\s+at\s*$'), '')
+              .replaceAll(RegExp(r'\s+Balance.*$'), '')
+              .trim();
+          if (merchant.isNotEmpty) {
+            return merchant;
+          }
+        }
+      }
+    }
+
+    // Fallback: use first 50 chars, redacted
+    String cleaned = smsBody.replaceAll(
+      RegExp(r'(OTP|PIN|CVV|ATM)[:\s]+[\w\d]+', caseSensitive: false),
+      '[REDACTED]',
+    );
+    if (cleaned.length > 50) {
+      cleaned = cleaned.substring(0, 50).trim() + '...';
+    }
+    return cleaned.isEmpty ? 'Transaction' : cleaned;
   }
 
   /// Extract amount from SMS - supports multiple currency formats
@@ -225,35 +264,117 @@ class SmsHistoryService {
     return sender.replaceAll(RegExp(r'[^\w\s]'), '').trim();
   }
 
-  /// Categorize transaction with AI
+  /// Categorize transaction with AI - now with smart detection
   Future<void> _categorizeTransaction(Transaction transaction) async {
     try {
-      final category = await _aiService.categorizeTransaction(transaction);
-
-      if (category != null && category.isNotEmpty) {
-        transaction.category = category;
+      // First try AI if available
+      String? aiCategory = await _aiService.categorizeTransaction(transaction);
+      
+      if (aiCategory != null && aiCategory.isNotEmpty) {
+        transaction.category = aiCategory;
         transaction.isCategorizedByAI = true;
         transaction.aiConfidence = 0.85;
+        print('[SmsHistory] AI categorized as: $aiCategory');
+        return;
       }
     } catch (e) {
-      print('[SmsHistory] AI categorization failed: $e');
-      transaction.category = _getDefaultCategory(transaction);
+      print('[SmsHistory] AI categorization tried but failed: $e');
     }
+
+    // Fallback to smart keyword matching
+    transaction.category = _getSmartCategory(transaction);
+    transaction.isCategorizedByAI = false;
+    transaction.aiConfidence = 0.0;
   }
 
-  /// Get default category
-  String _getDefaultCategory(Transaction transaction) {
+  /// Smart category detection using expanded keywords
+  String _getSmartCategory(Transaction transaction) {
     final desc = transaction.description.toLowerCase();
+    final fullBody = transaction.description.toLowerCase();
 
-    if (desc.contains('food') || desc.contains('restaurant') || desc.contains('mcdonalds')) {
+    // Food & Dining
+    if (desc.contains('food') || desc.contains('restaurant') || 
+        desc.contains('mcdonalds') || desc.contains('cafe') ||
+        desc.contains('coffee') || desc.contains('pizza') ||
+        desc.contains('burger') || desc.contains('dining') ||
+        desc.contains('hotel') || desc.contains('bar')) {
       return 'Food & Dining';
-    } else if (desc.contains('grocery')) {
+    }
+
+    // Groceries
+    if (desc.contains('grocery') || desc.contains('supermarket') ||
+        desc.contains('market') || desc.contains('walmart') ||
+        desc.contains('carrefour') || desc.contains('lulu')) {
       return 'Groceries';
-    } else if (desc.contains('fuel') || desc.contains('petrol')) {
+    }
+
+    // Transportation
+    if (desc.contains('fuel') || desc.contains('petrol') ||
+        desc.contains('gas') || desc.contains('uber') ||
+        desc.contains('taxi') || desc.contains('transport') ||
+        desc.contains('airline') || desc.contains('bus') ||
+        desc.contains('train') || desc.contains('station')) {
       return 'Transportation';
-    } else if (desc.contains('hospital') || desc.contains('medical')) {
+    }
+
+    // Shopping
+    if (desc.contains('shop') || desc.contains('store') ||
+        desc.contains('mall') || desc.contains('amazon') ||
+        desc.contains('online') || desc.contains('retail')) {
+      return 'Shopping';
+    }
+
+    // Healthcare
+    if (desc.contains('hospital') || desc.contains('medical') ||
+        desc.contains('pharmacy') || desc.contains('doctor') ||
+        desc.contains('clinic') || desc.contains('health')) {
       return 'Healthcare';
-    } else if (transaction.type == 'credit') {
+    }
+
+    // Bills & Utilities
+    if (desc.contains('bill') || desc.contains('utility') ||
+        desc.contains('electric') || desc.contains('water') ||
+        desc.contains('internet') || desc.contains('phone') ||
+        desc.contains('subscription')) {
+      return 'Bills & Utilities';
+    }
+
+    // Entertainment
+    if (desc.contains('movie') || desc.contains('cinema') ||
+        desc.contains('game') || desc.contains('entertainment') ||
+        desc.contains('music') || desc.contains('streaming')) {
+      return 'Entertainment';
+    }
+
+    // Education
+    if (desc.contains('school') || desc.contains('university') ||
+        desc.contains('college') || desc.contains('education') ||
+        desc.contains('course') || desc.contains('tuition')) {
+      return 'Education';
+    }
+
+    // Travel
+    if (desc.contains('hotel') || desc.contains('resort') ||
+        desc.contains('travel') || desc.contains('booking') ||
+        desc.contains('airbnb') || desc.contains('flight')) {
+      return 'Travel';
+    }
+
+    // Investment
+    if (desc.contains('invest') || desc.contains('trading') ||
+        desc.contains('stock') || desc.contains('mutual') ||
+        desc.contains('crypto') || desc.contains('broker')) {
+      return 'Investment';
+    }
+
+    // Transfer
+    if (desc.contains('transfer') || desc.contains('sent') ||
+        desc.contains('payment') || desc.contains('p2p')) {
+      return 'Transfer';
+    }
+
+    // Income/Credit
+    if (transaction.type == 'credit') {
       return 'Income';
     }
 
