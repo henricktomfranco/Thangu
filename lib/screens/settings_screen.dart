@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:thangu/services/export_service.dart';
 import 'package:thangu/services/proactive_ai_service.dart';
 import 'package:thangu/services/sms_history_service.dart';
+import 'add_transaction_screen.dart';
 import '../app_theme.dart';
 import '../services/ai_service.dart';
 import 'category_management_screen.dart';
@@ -324,13 +325,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   void _addTransaction() {
-    // TODO: Navigate to add transaction screen
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Add transaction screen coming soon!'),
-        backgroundColor: AppTheme.primaryDark,
-      ),
-    );
+    Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => const AddTransactionScreen(),
+        ));
   }
 
   @override

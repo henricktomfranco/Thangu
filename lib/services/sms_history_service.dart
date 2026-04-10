@@ -17,19 +17,100 @@ class SmsHistoryService {
   final RealSmsService _smsService = RealSmsService();
 
   Timer? _scanTimer;
+  Timer? _categorizeTimer;
 
-  /// Start background SMS scanning every 15 minutes
+  /// Start all background tasks
   void startBackgroundScanning() {
     _scanTimer?.cancel();
     _scanTimer = Timer.periodic(const Duration(minutes: 15), (_) {
-      scanNewSms();
+      scanNewSms(useAI: true);
     });
+
+    // AI categorization every 30 minutes
+    _categorizeTimer?.cancel();
+    _categorizeTimer = Timer.periodic(const Duration(minutes: 30), (_) {
+      categorizePendingTransactions();
+    });
+  }
+
+  /// Stop all background tasks
+  void stopBackgroundScanning() {
+    _scanTimer?.cancel();
+    _scanTimer = null;
+    _categorizeTimer?.cancel();
+    _categorizeTimer = null;
+  }
+
+  /// Categorize all pending transactions with AI
+  Future<int> categorizePendingTransactions() async {
+    try {
+      await _aiService.initialize();
+      final transactions = await _dbService.getTransactions(limit: 100);
+      final pending = transactions
+          .where((t) => t.category == 'Pending' && !t.isCategorizedByAI)
+          .toList();
+
+      int count = 0;
+      for (final txn in pending) {
+        try {
+          final category = await _aiService.categorizeTransaction(txn);
+          if (category != null) {
+            txn.category = category;
+            txn.isCategorizedByAI = true;
+            txn.aiConfidence = 0.85;
+            await _dbService.updateTransaction(txn);
+            count++;
+          }
+        } catch (e) {
+          continue;
+        }
+      }
+      print('[SmsHistory] Categorized $count pending transactions');
+      return count;
+    } catch (e) {
+      print('[SmsHistory] Error categorizing: $e');
+      return 0;
+    }
   }
 
   /// Stop background scanning
   void stopBackgroundScanning() {
     _scanTimer?.cancel();
     _scanTimer = null;
+    _categorizeTimer?.cancel();
+    _categorizeTimer = null;
+  }
+
+  /// Categorize all pending transactions with AI
+  Future<int> categorizePendingTransactions() async {
+    try {
+      await _aiService.initialize();
+      final transactions = await _dbService.getTransactions(limit: 100);
+      final pending = transactions
+          .where((t) => t.category == 'Pending' && !t.isCategorizedByAI)
+          .toList();
+
+      int count = 0;
+      for (final txn in pending) {
+        try {
+          final category = await _aiService.categorizeTransaction(txn);
+          if (category != null) {
+            txn.category = category;
+            txn.isCategorizedByAI = true;
+            txn.aiConfidence = 0.85;
+            await _dbService.updateTransaction(txn);
+            count++;
+          }
+        } catch (e) {
+          continue;
+        }
+      }
+      print('[SmsHistory] Categorized $count pending transactions');
+      return count;
+    } catch (e) {
+      print('[SmsHistory] Error categorizing: $e');
+      return 0;
+    }
   }
 
   /// Scan for new SMS messages only (since last scan)
