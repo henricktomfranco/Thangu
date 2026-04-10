@@ -48,7 +48,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   ];
 
   // App version
-  static const String _appVersion = '1.0.1';
+  static const String _appVersion = '1.0.1+2';
   bool _isCheckingUpdate = false;
 
   final ExportService _exportService = ExportService();
