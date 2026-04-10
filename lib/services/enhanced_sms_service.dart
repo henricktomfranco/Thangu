@@ -24,7 +24,7 @@ class EnhancedSmsService {
   // Bank SMS patterns for better extraction
   static final Map<String, RegExp> _bankPatterns = {
     'amount': RegExp(
-      r'(?:Rs\.?|INR|₹)\s*([0-9,]+\.?[0-9]*)',
+      r'(?:QAR|INR|Rs\.?|₹)\s*([0-9,]+\.?[0-9]*)',
       caseSensitive: false,
     ),
     'account':

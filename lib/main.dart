@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'app_theme.dart';
 import 'screens/home_screen.dart';
 import 'services/sms_history_service.dart';
+import 'services/ai_service.dart';
+import 'services/proactive_ai_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -14,6 +16,20 @@ void main() async {
       systemNavigationBarIconBrightness: Brightness.light,
     ),
   );
+
+  // Initialize AI services
+  print('[Startup] Initializing AI services...');
+  try {
+    final aiService = AiService();
+    await aiService.initialize();
+    print('[Startup] ✓ AI Service initialized');
+
+    final proactiveAi = ProactiveAiService();
+    await proactiveAi.initialize();
+    print('[Startup] ✓ Proactive AI Service initialized');
+  } catch (e) {
+    print('[Startup] ✗ Could not initialize AI: $e');
+  }
 
   // Load historical SMS messages on app startup
   print('[Startup] Loading historical SMS messages...');
