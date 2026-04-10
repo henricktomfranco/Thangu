@@ -8,6 +8,7 @@ import '../services/database_service.dart';
 import '../services/ai_service.dart';
 import '../widgets/transaction_card.dart';
 import '../widgets/category_selector.dart';
+import 'edit_transaction_screen.dart';
 
 class TransactionsScreen extends StatefulWidget {
   const TransactionsScreen({super.key});
@@ -70,6 +71,15 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
         _loadTransactions();
       }
     });
+  }
+
+  void _editTransaction(Transaction transaction) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => EditTransactionScreen(transaction: transaction),
+      ),
+    ).then((_) => _loadTransactions());
   }
 
   Future<void> _categorizeTransactionWithAI(Transaction transaction) async {
@@ -229,28 +239,32 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                                     color: AppTheme.textSecondary)),
                             const SizedBox(height: 8),
                             Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 24),
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 24),
                               child: const Text(
                                 'The app reads SMS messages to find financial transactions. '
                                 'Make sure you have granted SMS permission.',
                                 textAlign: TextAlign.center,
                                 style: TextStyle(
-                                    fontSize: 13,
-                                    color: AppTheme.textTertiary),
+                                    fontSize: 13, color: AppTheme.textTertiary),
                               ),
                             ),
                             const SizedBox(height: 24),
                             ElevatedButton.icon(
                               onPressed: () async {
-                                final granted = await PermissionService.requestSmsPermissions();
+                                final granted = await PermissionService
+                                    .requestSmsPermissions();
                                 if (mounted && granted) {
                                   _loadTransactions();
                                   ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('Permission granted! Loading SMS...')),
+                                    const SnackBar(
+                                        content: Text(
+                                            'Permission granted! Loading SMS...')),
                                   );
                                 }
                               },
-                              icon: const Icon(Icons.lock_open_rounded, size: 18),
+                              icon:
+                                  const Icon(Icons.lock_open_rounded, size: 18),
                               label: const Text('Grant SMS Permission'),
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: AppTheme.primary,
@@ -279,7 +293,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                             final txn = _filteredTransactions[index];
                             return TransactionCard(
                               transaction: txn,
-                              onTap: () => _showCategorySelector(txn),
+                              onTap: () => _editTransaction(txn),
                               onLongPress: () =>
                                   _categorizeTransactionWithAI(txn),
                             );

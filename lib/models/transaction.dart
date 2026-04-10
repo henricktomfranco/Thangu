@@ -15,7 +15,7 @@ class Transaction {
   Transaction({
     required this.id,
     required this.amount,
-    this.currency = 'INR',
+    this.currency = 'QAR',
     required this.type,
     required this.category,
     required this.description,

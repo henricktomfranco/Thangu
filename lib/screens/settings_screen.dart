@@ -148,6 +148,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
         'transaction_alert_threshold', _transactionAlertThreshold);
     await prefs.setInt('saving_aggression', _savingAggression);
 
+    // Also save to AI service
+    _aiService.updateConfiguration(
+      baseUrl: _aiBaseUrl,
+      modelName: _aiModel,
+      apiKey: _aiApiKey,
+      isOllama: _isOllama,
+    );
+    await _aiService.saveConfiguration();
+
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Settings saved ✓')),

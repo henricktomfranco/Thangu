@@ -44,6 +44,9 @@ class _AiChatScreenState extends State<AiChatScreen>
   Future<void> _initializeChat() async {
     setState(() => _isLoading = true);
     try {
+      // Initialize AI service with saved settings
+      await _aiService.initialize();
+
       final transactions = await _dbService.getTransactions(limit: 20);
       double monthlyIncome = 0, monthlyExpenses = 0;
       final now = DateTime.now();
@@ -104,6 +107,9 @@ class _AiChatScreenState extends State<AiChatScreen>
     _scrollToBottom();
 
     try {
+      // Ensure AI service is initialized with latest settings
+      await _aiService.initialize();
+
       final prompt = '''
       You are Thangu, a friendly and helpful AI finance assistant. The user asked: "$text"
       
