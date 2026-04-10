@@ -1,6 +1,9 @@
 name: thangu
+
 description: AI-based finance manager app that reads SMS and categorizes transactions
-publish_to: 'none' # Remove this line if you wish to publish to pub.dev
+
+publish_to: 'none'
+
 version: 1.0.0+1
 
 environment:
@@ -13,8 +16,8 @@ dependencies:
   shared_preferences: ^2.2.0
   path_provider: ^2.1.0
   sqflite: ^2.3.0
-  intl: ^0.17.0  # Downgraded to fix conflict with charts_flutter
-  charts_flutter: ^0.12.0
+  intl: ^0.17.0
+  fl_chart: ^0.66.0
   flutter_svg: ^2.0.5
 
 dev_dependencies:

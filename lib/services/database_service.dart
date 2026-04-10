@@ -1,6 +1,7 @@
-import 'dart:io';
-import 'package:path_provider/path_provider.dart';
+import 'dart:async';
+import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
+
 import '../models/transaction.dart' as app_transaction;
 import '../models/goal.dart';
 
@@ -11,17 +12,16 @@ class DatabaseService {
 
   Database? _database;
 
-  // Database constants
   static const String _databaseName = 'thangu.db';
   static const int _databaseVersion = 1;
 
-  // Table names
   static const String tableTransactions = 'transactions';
   static const String tableGoals = 'goals';
 
-  // Column names for transactions table
+  // Column names for transactions
   static const String columnId = 'id';
   static const String columnAmount = 'amount';
+  static const String columnCurrency = 'currency';
   static const String columnType = 'type';
   static const String columnCategory = 'category';
   static const String columnDescription = 'description';
@@ -30,7 +30,7 @@ class DatabaseService {
   static const String columnIsCategorizedByAI = 'is_categorized_by_ai';
   static const String columnAiConfidence = 'ai_confidence';
 
-  // Column names for goals table
+  // Column names for goals
   static const String columnGoalId = 'id';
   static const String columnGoalName = 'name';
   static const String columnTargetAmount = 'target_amount';
@@ -46,8 +46,7 @@ class DatabaseService {
   }
 
   Future<Database> _initDatabase() async {
-    Directory documentsDirectory = await getApplicationDocumentsDirectory();
-    String path = '${documentsDirectory.path}/$_databaseName';
+    String path = join(await getDatabasesPath(), _databaseName);
     return await openDatabase(
       path,
       version: _databaseVersion,
@@ -56,11 +55,11 @@ class DatabaseService {
   }
 
   Future<void> _onCreate(Database db, int version) async {
-    // Create transactions table
     await db.execute('''
       CREATE TABLE $tableTransactions (
         $columnId TEXT PRIMARY KEY,
         $columnAmount REAL NOT NULL,
+        $columnCurrency TEXT NOT NULL DEFAULT 'INR',
         $columnType TEXT NOT NULL,
         $columnCategory TEXT NOT NULL,
         $columnDescription TEXT,
@@ -71,13 +70,12 @@ class DatabaseService {
       )
     ''');
 
-    // Create goals table
     await db.execute('''
       CREATE TABLE $tableGoals (
         $columnGoalId TEXT PRIMARY KEY,
         $columnGoalName TEXT NOT NULL,
         $columnTargetAmount REAL NOT NULL,
-        $columnCurrentAmount REAL NOT NULL DEFAULT 0,
+        $columnCurrentAmount REAL NOT NULL,
         $columnTargetDate TEXT NOT NULL,
         $columnGoalCategory TEXT NOT NULL,
         $columnGoalIcon TEXT NOT NULL
@@ -85,49 +83,38 @@ class DatabaseService {
     ''');
   }
 
-// Transaction CRUD operations
   Future<int> insertTransaction(app_transaction.Transaction transaction) async {
     final db = await database;
     return await db.insert(tableTransactions, transaction.toMap());
   }
 
-  Future<List<app_transaction.Transaction>> getTransactions({
-    int limit = 50,
-    DateTime? startDate,
-    DateTime? endDate,
-  }) async {
+  Future<List<app_transaction.Transaction>> getTransactions(
+      {int limit = 50, DateTime? startDate, DateTime? endDate}) async {
     final db = await database;
-
-    var query = 'SELECT * FROM $tableTransactions';
-    final List<String> whereArgs = [];
+    String query = 'SELECT * FROM $tableTransactions';
+    List<dynamic> whereArgs = [];
 
     if (startDate != null || endDate != null) {
-      query += ' WHERE';
+      List<String> conditions = [];
       if (startDate != null) {
-        query += ' $columnDate >= ?';
+        conditions.add('$columnDate >= ?');
         whereArgs.add(startDate.toIso8601String());
       }
       if (endDate != null) {
-        if (startDate != null) query += ' AND';
-        query += ' $columnDate <= ?';
+        conditions.add('$columnDate <= ?');
         whereArgs.add(endDate.toIso8601String());
+      }
+      if (conditions.isNotEmpty) {
+        query += ' WHERE ${conditions.join(' AND ')}';
       }
     }
 
-    query += ' ORDER BY $columnDate DESC';
-    if (limit > 0) {
-      query += ' LIMIT $limit';
-    }
+    query += ' LIMIT $limit';
 
-    final List<Map<String, dynamic>> maps = await db.query(
-      tableTransactions,
-      limit: limit,
-      orderBy: '$columnDate DESC',
-    );
-
-    return List.generate(maps.length, (i) {
-      return app_transaction.Transaction.fromMap(maps[i]);
-    });
+    final List<Map<String, dynamic>> maps =
+        await db.rawQuery(query, whereArgs);
+    return List.generate(
+        maps.length, (i) => app_transaction.Transaction.fromMap(maps[i]));
   }
 
   Future<int> updateTransaction(app_transaction.Transaction transaction) async {
@@ -149,26 +136,50 @@ class DatabaseService {
     );
   }
 
-  // Goal CRUD operations
+  // Goal methods
   Future<int> insertGoal(SavingsGoal goal) async {
     final db = await database;
-    return await db.insert(tableGoals, goal.toMap());
+    return await db.insert(tableGoals, {
+      columnGoalId: goal.id,
+      columnGoalName: goal.name,
+      columnTargetAmount: goal.targetAmount,
+      columnCurrentAmount: goal.currentAmount,
+      columnTargetDate: goal.targetDate.toIso8601String(),
+      columnGoalCategory: goal.category,
+      columnGoalIcon: goal.icon,
+    });
   }
 
   Future<List<SavingsGoal>> getGoals() async {
     final db = await database;
     final List<Map<String, dynamic>> maps = await db.query(tableGoals);
-
-    return List.generate(maps.length, (i) {
-      return SavingsGoal.fromMap(maps[i]);
-    });
+    return List.generate(
+      maps.length,
+      (i) => SavingsGoal(
+        id: maps[i][columnGoalId],
+        name: maps[i][columnGoalName],
+        targetAmount: maps[i][columnTargetAmount].toDouble(),
+        currentAmount: maps[i][columnCurrentAmount].toDouble(),
+        targetDate: DateTime.parse(maps[i][columnTargetDate]),
+        category: maps[i][columnGoalCategory],
+        icon: maps[i][columnGoalIcon],
+      ),
+    );
   }
 
   Future<int> updateGoal(SavingsGoal goal) async {
     final db = await database;
     return await db.update(
       tableGoals,
-      goal.toMap(),
+      {
+        columnGoalId: goal.id,
+        columnGoalName: goal.name,
+        columnTargetAmount: goal.targetAmount,
+        columnCurrentAmount: goal.currentAmount,
+        columnTargetDate: goal.targetDate.toIso8601String(),
+        columnGoalCategory: goal.category,
+        columnGoalIcon: goal.icon,
+      },
       where: '$columnGoalId = ?',
       whereArgs: [goal.id],
     );
@@ -183,9 +194,8 @@ class DatabaseService {
     );
   }
 
-  // Close database
   Future<void> close() async {
     final db = await database;
-    db.close();
+    await db.close();
   }
 }

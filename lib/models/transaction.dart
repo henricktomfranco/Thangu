@@ -3,6 +3,7 @@ import 'dart:convert';
 class Transaction {
   final String id;
   final double amount;
+  final String currency;
   final String type;
   String category;
   final String description;
@@ -14,6 +15,7 @@ class Transaction {
   Transaction({
     required this.id,
     required this.amount,
+    this.currency = 'INR',
     required this.type,
     required this.category,
     required this.description,
@@ -23,22 +25,11 @@ class Transaction {
     this.aiConfidence = 0.0,
   });
 
-  factory Transaction.fromSms(Map<String, dynamic> smsData) {
-    return Transaction(
-      id: smsData['id'] ?? DateTime.now().millisecondsSinceEpoch.toString(),
-      amount: smsData['amount'] ?? 0.0,
-      type: smsData['type'] ?? 'debit',
-      category: smsData['category'] ?? 'Uncategorized',
-      description: smsData['description'] ?? '',
-      date: smsData['date'] ?? DateTime.now(),
-      sender: smsData['sender'] ?? '',
-    );
-  }
-
   Map<String, dynamic> toMap() {
     return {
       'id': id,
       'amount': amount,
+      'currency': currency,
       'type': type,
       'category': category,
       'description': description,
@@ -53,6 +44,7 @@ class Transaction {
     return Transaction(
       id: map['id'],
       amount: (map['amount'] as num).toDouble(),
+      currency: map['currency'] ?? 'INR',
       type: map['type'],
       category: map['category'],
       description: map['description'] ?? '',
@@ -62,9 +54,4 @@ class Transaction {
       aiConfidence: (map['ai_confidence'] as num?)?.toDouble() ?? 0.0,
     );
   }
-
-  String toJson() => json.encode(toMap());
-
-  factory Transaction.fromJson(String source) =>
-      Transaction.fromMap(json.decode(source));
 }

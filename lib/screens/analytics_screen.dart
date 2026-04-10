@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:charts_flutter/flutter.dart' as charts;
+import 'package:fl_chart/fl_chart.dart' as charts;
 import '../app_theme.dart';
 import '../models/transaction.dart';
 import '../services/database_service.dart';
@@ -292,19 +292,10 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                   child: Text('No expense data available',
                       style: TextStyle(color: AppTheme.textSecondary)))
               : charts.PieChart(
-                  _getCategorySeries(),
-                  animate: true,
-                  defaultRenderer: charts.ArcRendererConfig(
-                    arcWidth: 60,
-                    arcRendererDecorators: [
-                      charts.ArcLabelDecorator(
-                        labelPosition: charts.ArcLabelPosition.inside,
-                        insideLabelStyleSpec: const charts.TextStyleSpec(
-                          color: charts.MaterialPalette.white,
-                          fontSize: 11,
-                        ),
-                      ),
-                    ],
+                  charts.PieChartData(
+                    sections: _getPieChartSections(),
+                    sectionsSpace: 0,
+                    centerSpaceRadius: 40,
                   ),
                 ),
         ),
@@ -320,13 +311,17 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                   child: Text('No daily spending data available',
                       style: TextStyle(color: AppTheme.textSecondary)))
               : charts.BarChart(
-                  _getDailySeries(),
-                  animate: true,
-                  vertical: false,
-                  barRendererDecorator: charts.BarLabelDecorator<String>(),
-                  domainAxis: const charts.OrdinalAxisSpec(),
-                  primaryMeasureAxis: const charts.NumericAxisSpec(
-                    showAxisLine: true,
+                  charts.BarChartData(
+                    barGroups: _getBarGroups(),
+                    borderData: charts.FlBorderData(show: false),
+                    titlesData: charts.FlTitlesData(
+                      bottomTitles: charts.AxisTitles(
+                        sideTitles: charts.SideTitles(showTitles: false),
+                      ),
+                      leftTitles: charts.AxisTitles(
+                        sideTitles: charts.SideTitles(showTitles: false),
+                      ),
+                    ),
                   ),
                 ),
         ),
@@ -334,43 +329,45 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     );
   }
 
-  List<charts.Series<MapEntry<String, double>, String>> _getCategorySeries() {
+  List<charts.PieChartSectionData> _getPieChartSections() {
     final data = _categoryExpenses.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
 
-    return [
-      charts.Series<MapEntry<String, double>, String>(
-        id: 'Categories',
-        domainFn: (entry, _) => entry.key,
-        measureFn: (entry, _) => entry.value,
-        colorFn: (_, index) => charts.ColorUtil.fromDartColor(
-            AppTheme.getCategoryColor(data[index!].key)),
-        labelAccessorFn: (entry, _) =>
-            '${entry.key}\n\$${entry.value.toStringAsFixed(0)}',
-        data: data,
-      )
-    ];
+    return data.map((entry) {
+      return charts.PieChartSectionData(
+        value: entry.value,
+        title: entry.value.toStringAsFixed(0),
+        color: AppTheme.getCategoryColor(entry.key),
+        radius: 60,
+        titleStyle: const TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.bold,
+          color: Colors.white,
+        ),
+      );
+    }).toList();
   }
 
-  List<charts.Series<MapEntry<String, double>, String>> _getDailySeries() {
+  List<charts.BarChartGroupData> _getBarGroups() {
     final data = _dailyExpenses.entries.toList()
       ..sort((a, b) => a.key.compareTo(b.key));
 
-    // Limit to last 7 days for better visualization
     if (data.length > 7) {
       data.removeRange(0, data.length - 7);
     }
 
-    return [
-      charts.Series<MapEntry<String, double>, String>(
-        id: 'Daily',
-        domainFn: (entry, _) => entry.key,
-        measureFn: (entry, _) => entry.value,
-        colorFn: (_, __) => charts.MaterialPalette.blue.shadeDefault,
-        labelAccessorFn: (entry, _) => '\$${entry.value.toStringAsFixed(0)}',
-        data: data,
-      )
-    ];
+    return data.asMap().entries.map((entry) {
+      return charts.BarChartGroupData(
+        x: entry.key,
+        barRods: [
+          charts.BarChartRodData(
+            toY: entry.value.value,
+            color: AppTheme.primary,
+            width: 16,
+          ),
+        ],
+      );
+    }).toList();
   }
 
   Widget _buildCategoryBreakdown() {
