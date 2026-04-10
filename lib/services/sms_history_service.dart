@@ -16,16 +16,25 @@ class SmsHistoryService {
   final RealSmsService _smsService = RealSmsService();
 
   /// Load historical SMS messages and save to database
+  /// [lastDays] can be int (number of days) or Duration
   Future<int> loadHistoricalSms({
-    Duration? lastDays,
+    dynamic lastDays,
     bool overwrite = false,
   }) async {
     try {
       print('[SmsHistory] Starting to load historical SMS...');
 
+      // Convert to days if Duration
+      int limitDays = 90; // default
+      if (lastDays is Duration) {
+        limitDays = lastDays.inDays;
+      } else if (lastDays is int) {
+        limitDays = lastDays;
+      }
+
       // Request to load SMS from native side
       final result = await _channel.invokeMethod('loadHistoricalSms', {
-        'limitDays': lastDays?.inDays ?? 90, // Default: last 90 days
+        'limitDays': limitDays,
       });
 
       if (result == null) {
