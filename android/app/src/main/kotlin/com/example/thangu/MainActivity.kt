@@ -7,13 +7,12 @@ import android.util.Log
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.example.thangu/sms"
-    private lateinit var smsChannel: MethodChannel
     private val TAG = "MainActivity"
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
-        smsChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
+        val smsChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
         
         smsChannel.setMethodCallHandler { call, result ->
             when (call.method) {
@@ -27,17 +26,22 @@ class MainActivity : FlutterActivity() {
             }
         }
 
-        // Set up callback for SMS messages
-        SmsReceiver.setSmsCallback { messageBody, sender ->
-            try {
-                smsChannel.invokeMethod("onSmsReceived", mapOf(
-                    "body" to messageBody,
-                    "sender" to sender,
-                    "timestamp" to System.currentTimeMillis()
-                ))
-            } catch (e: Exception) {
-                Log.e(TAG, "Error invoking SMS method: ${e.message}", e)
+        try {
+            // Set up callback for SMS messages
+            SmsReceiver.setSmsCallback { messageBody, sender ->
+                try {
+                    Log.d(TAG, "SMS callback received: $sender")
+                    smsChannel.invokeMethod("onSmsReceived", mapOf(
+                        "body" to messageBody,
+                        "sender" to sender,
+                        "timestamp" to System.currentTimeMillis()
+                    ))
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error invoking SMS method: ${e.message}", e)
+                }
             }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error setting up SMS callback: ${e.message}", e)
         }
     }
 }
