@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:thangu/services/export_service.dart';
 import 'package:thangu/services/proactive_ai_service.dart';
+import 'package:thangu/services/sms_history_service.dart';
 import '../app_theme.dart';
 import '../services/ai_service.dart';
 import 'category_management_screen.dart';
@@ -52,7 +53,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _isCheckingUpdate = false;
 
   final ExportService _exportService = ExportService();
+  final SmsHistoryService _smsHistoryService = SmsHistoryService();
   late AiService _aiService;
+  bool _isScanning = false;
 
   @override
   void initState() {
@@ -267,6 +270,69 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _scanSms() async {
+    if (_isScanning) return;
+
+    setState(() => _isScanning = true);
+
+    try {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Row(
+            children: [
+              SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                ),
+              ),
+              SizedBox(width: 12),
+              Text('Scanning SMS...'),
+            ],
+          ),
+          backgroundColor: AppTheme.primaryDark,
+          duration: Duration(seconds: 2),
+        ),
+      );
+
+      final count = await _smsHistoryService.scanNewSms(useAI: true);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Found $count new transactions'),
+            backgroundColor: count > 0 ? AppTheme.accentGreen : AppTheme.accent,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error scanning: $e'),
+            backgroundColor: AppTheme.accentRed,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isScanning = false);
+      }
+    }
+  }
+
+  void _addTransaction() {
+    // TODO: Navigate to add transaction screen
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Add transaction screen coming soon!'),
+        backgroundColor: AppTheme.primaryDark,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -413,6 +479,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _buildSectionHeader('Proactive Coach'),
           _buildCard([
             _buildSavingAggressionRow(),
+          ]),
+
+          // ─── SMS Scanning ───────────────────────────
+          _buildSectionHeader('SMS Scanning'),
+          _buildCard([
+            _buildNavigationRow(
+              icon: Icons.sync_rounded,
+              iconColor: AppTheme.accentGreen,
+              title: 'Scan SMS Now',
+              subtitle: 'Scan for new transactions',
+              onTap: _scanSms,
+            ),
+            _buildDivider(),
+            _buildNavigationRow(
+              icon: Icons.add_rounded,
+              iconColor: AppTheme.primaryLight,
+              title: 'Add Transaction',
+              subtitle: 'Add manually',
+              onTap: _addTransaction,
+            ),
           ]),
 
 // ─── About ─────────────────────────────────────

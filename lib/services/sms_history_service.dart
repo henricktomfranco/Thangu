@@ -16,15 +16,54 @@ class SmsHistoryService {
   final AiService _aiService = AiService();
   final RealSmsService _smsService = RealSmsService();
 
+  Timer? _scanTimer;
+
+  /// Start background SMS scanning every 15 minutes
+  void startBackgroundScanning() {
+    _scanTimer?.cancel();
+    _scanTimer = Timer.periodic(const Duration(minutes: 15), (_) {
+      scanNewSms();
+    });
+  }
+
+  /// Stop background scanning
+  void stopBackgroundScanning() {
+    _scanTimer?.cancel();
+    _scanTimer = null;
+  }
+
+  /// Scan for new SMS messages only (since last scan)
+  Future<int> scanNewSms({bool useAI = true}) async {
+    try {
+      // Get last transaction date
+      final existingTxn = await _dbService.getTransactions(limit: 1);
+      DateTime? lastScanTime;
+      if (existingTxn.isNotEmpty) {
+        lastScanTime = existingTxn.first.date;
+      }
+
+      // Load SMS from last 1 day only for new messages
+      final count = await loadHistoricalSms(lastDays: 1, useAI: useAI);
+      return count;
+    } catch (e) {
+      print('[SmsHistory] Error scanning new SMS: $e');
+      return 0;
+    }
+  }
+
   /// Load historical SMS messages and save to database
   /// [lastDays] can be int (number of days) or Duration
+  /// [useAI] - whether to use AI for categorization (skip on first load for speed)
   Future<int> loadHistoricalSms({
     dynamic lastDays,
     bool overwrite = false,
+    bool useAI = true,
   }) async {
     try {
-      // Initialize AI service with saved settings
-      await _aiService.initialize();
+      // Initialize AI service only if using AI
+      if (useAI) {
+        await _aiService.initialize();
+      }
       print('[SmsHistory] Starting to load historical SMS...');
 
       // Convert to days if Duration
@@ -106,8 +145,10 @@ class SmsHistoryService {
           // Parse SMS content
           final transaction = _parseSms(body, sender, timestamp);
 
-          // Try AI categorization
-          await _categorizeTransaction(transaction);
+          // Try AI categorization (optional)
+          if (useAI) {
+            await _categorizeTransaction(transaction);
+          }
 
           // Save to database
           await _dbService.insertTransaction(transaction);

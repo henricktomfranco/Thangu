@@ -31,17 +31,21 @@ void main() async {
     print('[Startup] ✗ Could not initialize AI: $e');
   }
 
-  // Load historical SMS messages on app startup
+  // Load historical SMS messages on app startup (skip AI for speed)
   print('[Startup] Loading historical SMS messages...');
   try {
     final smsHistory = SmsHistoryService();
     final count = await smsHistory.loadHistoricalSms(
       lastDays: 90, // Load messages from last 90 days
+      useAI: false, // Skip AI on first load for speed
     );
     print('[Startup] ✓ Loaded $count historical transactions');
+
+    // Start background scanning for new SMS every 15 min
+    smsHistory.startBackgroundScanning();
+    print('[Startup] ✓ Background SMS scanning started (15 min interval)');
   } catch (e) {
     print('[Startup] ✗ Could not load historical SMS: $e');
-    // Continue anyway - not critical if SMS history fails
   }
 
   print('[Startup] App initialization complete, launching UI...');
