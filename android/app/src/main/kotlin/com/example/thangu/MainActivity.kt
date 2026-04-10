@@ -6,16 +6,22 @@ import io.flutter.plugin.common.MethodChannel
 import android.util.Log
 import android.provider.Telephony
 import android.provider.BaseColumns
+import android.content.pm.PackageManager
+import android.Manifest
+import androidx.core.app.ActivityCompat
 import java.util.Calendar
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.example.thangu/sms"
+    private val PERMISSIONS_CHANNEL = "com.example.thangu/permissions"
     private val TAG = "MainActivity"
+    private val SMS_PERMISSION_REQUEST_CODE = 100
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
         val smsChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
+        val permissionsChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PERMISSIONS_CHANNEL)
         
         smsChannel.setMethodCallHandler { call, result ->
             when (call.method) {
@@ -23,10 +29,22 @@ class MainActivity : FlutterActivity() {
                     Log.d(TAG, "SMS listener initialized")
                     result.success(true)
                 }
+                "checkPermissions" -> {
+                    try {
+                        val hasSmsPermission = checkSelfPermission("android.permission.READ_SMS") == PackageManager.PERMISSION_GRANTED
+                        Log.d(TAG, "Permission check result: $hasSmsPermission")
+                        result.success(hasSmsPermission)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error checking permissions: ${e.message}")
+                        result.error("PERMISSION_ERROR", e.message, null)
+                    }
+                }
                 "loadHistoricalSms" -> {
                     try {
                         val limitDays = call.argument<Int>("limitDays") ?: 90
+                        Log.d(TAG, "Loading historical SMS for last $limitDays days")
                         val smsList = loadHistoricalSms(limitDays)
+                        Log.d(TAG, "Successfully loaded ${smsList.size} SMS messages")
                         result.success(smsList)
                     } catch (e: Exception) {
                         Log.e(TAG, "Error loading historical SMS: ${e.message}", e)
@@ -36,6 +54,32 @@ class MainActivity : FlutterActivity() {
                 else -> {
                     result.notImplemented()
                 }
+            }
+        }
+
+        permissionsChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "requestSmsPermissions" -> {
+                    try {
+                        if (checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
+                            Log.d(TAG, "Requesting SMS permissions...")
+                            ActivityCompat.requestPermissions(
+                                this,
+                                arrayOf(Manifest.permission.READ_SMS),
+                                SMS_PERMISSION_REQUEST_CODE
+                            )
+                            // Will use callback result
+                            result.success(null)
+                        } else {
+                            Log.d(TAG, "SMS permissions already granted")
+                            result.success(true)
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error requesting permissions: ${e.message}")
+                        result.error("PERMISSION_ERROR", e.message, null)
+                    }
+                }
+                else -> result.notImplemented()
             }
         }
 

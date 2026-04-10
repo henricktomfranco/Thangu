@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/services.dart';
 import 'package:thangu/models/transaction.dart';
 import 'package:thangu/services/database_service.dart';
@@ -32,18 +33,35 @@ class SmsHistoryService {
         limitDays = lastDays;
       }
 
+      print('[SmsHistory] Requesting SMS from last $limitDays days');
+
       // Request to load SMS from native side
       final result = await _channel.invokeMethod('loadHistoricalSms', {
         'limitDays': limitDays,
-      });
+      }).timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          print('[SmsHistory] Method channel timeout after 10 seconds');
+          return null;
+        },
+      );
 
       if (result == null) {
-        print('[SmsHistory] No SMS data received from platform');
+        print('[SmsHistory] No SMS data received from platform (null result)');
+        print('[SmsHistory] This may indicate:');
+        print('[SmsHistory]   - SMS permissions not granted');
+        print('[SmsHistory]   - No SMS messages in device history');
+        print('[SmsHistory]   - Platform method not implemented');
         return 0;
       }
 
       final List<dynamic> smsList = result as List<dynamic>;
-      print('[SmsHistory] Received ${smsList.length} SMS messages');
+      print('[SmsHistory] Received ${smsList.length} SMS messages from platform');
+
+      if (smsList.isEmpty) {
+        print('[SmsHistory] No SMS messages found in the last $limitDays days');
+        return 0;
+      }
 
       int savedCount = 0;
 
@@ -54,7 +72,10 @@ class SmsHistoryService {
           final sender = message['sender'] as String? ?? 'Unknown';
           final timestamp = message['timestamp'] as int? ?? 0;
 
-          if (body.isEmpty) continue;
+          if (body.isEmpty) {
+            print('[SmsHistory] Skipping SMS with empty body from $sender');
+            continue;
+          }
 
           // Check if already exists in database
           final existingTxn = await _dbService.getTransactions();
@@ -65,6 +86,7 @@ class SmsHistoryService {
           );
 
           if (isDuplicate && !overwrite) {
+            print('[SmsHistory] Duplicate SMS skipped: ${body.substring(0, 30)}...');
             continue;
           }
 
@@ -78,17 +100,22 @@ class SmsHistoryService {
           await _dbService.insertTransaction(transaction);
           savedCount++;
 
-          print('[SmsHistory] Saved: ${transaction.description}');
+          print('[SmsHistory] ✓ Saved transaction #$savedCount: ${transaction.description}');
         } catch (e) {
-          print('[SmsHistory] Error processing SMS: $e');
+          print('[SmsHistory] ✗ Error processing SMS message: $e');
           continue;
         }
       }
 
-      print('[SmsHistory] Successfully saved $savedCount transactions');
+      print('[SmsHistory] ✓ Successfully saved $savedCount transactions to database');
       return savedCount;
+    } on PlatformException catch (e) {
+      print('[SmsHistory] ✗ Platform error: ${e.code}');
+      print('[SmsHistory]   Message: ${e.message}');
+      print('[SmsHistory]   Details: ${e.details}');
+      return 0;
     } catch (e) {
-      print('[SmsHistory] Error loading historical SMS: $e');
+      print('[SmsHistory] ✗ Unexpected error: $e');
       return 0;
     }
   }

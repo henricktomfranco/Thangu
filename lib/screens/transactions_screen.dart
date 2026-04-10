@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:thangu/services/real_sms_service.dart';
+import 'package:thangu/services/permission_service.dart';
 import '../app_theme.dart';
 import '../models/transaction.dart';
 import '../services/database_service.dart';
@@ -227,10 +228,40 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                                     fontSize: 16,
                                     color: AppTheme.textSecondary)),
                             const SizedBox(height: 8),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 24),
+                              child: const Text(
+                                'The app reads SMS messages to find financial transactions. '
+                                'Make sure you have granted SMS permission.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                    fontSize: 13,
+                                    color: AppTheme.textTertiary),
+                              ),
+                            ),
+                            const SizedBox(height: 24),
+                            ElevatedButton.icon(
+                              onPressed: () async {
+                                final granted = await PermissionService.requestSmsPermissions();
+                                if (mounted && granted) {
+                                  _loadTransactions();
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('Permission granted! Loading SMS...')),
+                                  );
+                                }
+                              },
+                              icon: const Icon(Icons.lock_open_rounded, size: 18),
+                              label: const Text('Grant SMS Permission'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppTheme.primary,
+                                foregroundColor: Colors.white,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
                             TextButton.icon(
                               onPressed: _startSmsListener,
-                              icon: const Icon(Icons.sms_rounded, size: 18),
-                              label: const Text('Simulate SMS'),
+                              icon: const Icon(Icons.refresh_rounded, size: 18),
+                              label: const Text('Refresh Transactions'),
                               style: TextButton.styleFrom(
                                   foregroundColor: AppTheme.primary),
                             ),

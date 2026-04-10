@@ -16,17 +16,19 @@ void main() async {
   );
 
   // Load historical SMS messages on app startup
+  print('[Startup] Loading historical SMS messages...');
   try {
     final smsHistory = SmsHistoryService();
     final count = await smsHistory.loadHistoricalSms(
       lastDays: 90, // Load messages from last 90 days
     );
-    print('✓ Loaded $count historical transactions');
+    print('[Startup] ✓ Loaded $count historical transactions');
   } catch (e) {
-    print('Note: Could not load historical SMS: $e');
+    print('[Startup] ✗ Could not load historical SMS: $e');
     // Continue anyway - not critical if SMS history fails
   }
 
+  print('[Startup] App initialization complete, launching UI...');
   runApp(const ThanguApp());
 }
 
