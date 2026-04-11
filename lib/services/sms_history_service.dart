@@ -73,46 +73,6 @@ class SmsHistoryService {
     }
   }
 
-  /// Stop background scanning
-  void stopBackgroundScanning() {
-    _scanTimer?.cancel();
-    _scanTimer = null;
-    _categorizeTimer?.cancel();
-    _categorizeTimer = null;
-  }
-
-  /// Categorize all pending transactions with AI
-  Future<int> categorizePendingTransactions() async {
-    try {
-      await _aiService.initialize();
-      final transactions = await _dbService.getTransactions(limit: 100);
-      final pending = transactions
-          .where((t) => t.category == 'Pending' && !t.isCategorizedByAI)
-          .toList();
-
-      int count = 0;
-      for (final txn in pending) {
-        try {
-          final category = await _aiService.categorizeTransaction(txn);
-          if (category != null) {
-            txn.category = category;
-            txn.isCategorizedByAI = true;
-            txn.aiConfidence = 0.85;
-            await _dbService.updateTransaction(txn);
-            count++;
-          }
-        } catch (e) {
-          continue;
-        }
-      }
-      print('[SmsHistory] Categorized $count pending transactions');
-      return count;
-    } catch (e) {
-      print('[SmsHistory] Error categorizing: $e');
-      return 0;
-    }
-  }
-
   /// Scan for new SMS messages only (since last scan)
   Future<int> scanNewSms({bool useAI = true}) async {
     try {
