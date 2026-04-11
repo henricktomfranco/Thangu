@@ -62,8 +62,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void initState() {
     super.initState();
     _aiService = AiService();
-    _loadSettings();
-    // Fetch available models when screen loads
+    _initializeSettings();
+  }
+
+  /// Initialize settings and then fetch available models
+  Future<void> _initializeSettings() async {
+    await _loadSettings();
+    // Fetch available models after settings are loaded
     _fetchAvailableModels();
   }
 
@@ -92,16 +97,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
         setState(() {
           if (models.isNotEmpty) {
             _availableModels = models;
-            // If current model is not in the list, select the first one
+            // Keep the saved model even if not in current list
+            // This preserves user's selection across sessions
             if (!models.contains(_aiModel)) {
-              _aiModel = models.first;
+              _modelsErrorMessage =
+                  'Model "$_aiModel" not on server. Select from available or keep saved.';
+            } else {
+              _modelsErrorMessage = null;
             }
-            _modelsErrorMessage = null;
           } else {
             // If no models found, use defaults and show message
             _availableModels =
                 _isOllama ? _defaultOllamaModels : _defaultOpenAiModels;
-            _modelsErrorMessage = 'No models found. Using default list.';
+            _modelsErrorMessage =
+                'No models found from server. Using default list.';
           }
           _isFetchingModels = false;
         });
@@ -120,11 +129,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
+    final savedBaseUrl =
+        prefs.getString('ai_base_url') ?? AiService.defaultOllamaUrl;
+    final savedModel = prefs.getString('ai_model') ?? 'llama2';
+    final savedApiKey = prefs.getString('ai_api_key') ?? '';
+    final savedIsOllama = prefs.getBool('ai_is_ollama') ?? true;
+
     setState(() {
-      _aiBaseUrl = prefs.getString('ai_base_url') ?? AiService.defaultOllamaUrl;
-      _aiModel = prefs.getString('ai_model') ?? 'llama2';
-      _aiApiKey = prefs.getString('ai_api_key') ?? '';
-      _isOllama = prefs.getBool('ai_is_ollama') ?? true;
+      _aiBaseUrl = savedBaseUrl;
+      _aiModel = savedModel;
+      _aiApiKey = savedApiKey;
+      _isOllama = savedIsOllama;
       _notificationsEnabled = prefs.getBool('notifications_enabled') ?? true;
       _biometricAuth = prefs.getBool('biometric_auth') ?? false;
       _transactionAlertThreshold =
