@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:thangu/screens/analytics_screen.dart';
 import '../app_theme.dart';
 import '../services/database_service.dart';
@@ -51,27 +53,50 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     super.dispose();
   }
 
+  /// Get consistent total balance from app storage
+  Future<double> _getConsistentTotalBalance() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getDouble('total_balance') ?? 0;
+  }
+
+  /// Save total balance to app storage for consistency
+  Future<void> _saveTotalBalance(double balance) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('total_balance', balance);
+  }
+
+  /// Calculate total balance from transactions
+  double _calculateTotalBalanceFromTransactions(
+      List<app_txn.Transaction> transactions) {
+    double balance = 0;
+    // Sort by date for accurate balance calculation
+    final sorted = transactions..sort((a, b) => a.date.compareTo(b.date));
+    for (final txn in sorted) {
+      if (txn.type == 'credit') {
+        balance += txn.amount;
+      } else {
+        balance -= txn.amount;
+      }
+    }
+    return balance;
+  }
+
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
     try {
-      final transactions = await _dbService.getTransactions(limit: 500);
+      // Get ALL transactions (no limit) to calculate accurate total balance
+      // For better performance, calculate from DateTime.now().subtract(Duration(days: 365 * 10))
+      // This covers 10 years of transactions
+      final transactions = await _dbService.getTransactions(
+          startDate: DateTime.now().subtract(Duration(days: 365 * 10)));
       final goals = await _dbService.getGoals();
 
-      // Calculate all-time total balance
-      double totalBalance = 0;
-      // Calculate current month stats
+      // Calculate current month stats first
       final now = DateTime.now();
       final startOfMonth = DateTime(now.year, now.month, 1);
       double monthlyIncome = 0, monthlyExpenses = 0;
 
       for (final txn in transactions) {
-        // All-time balance
-        if (txn.type == 'credit') {
-          totalBalance += txn.amount;
-        } else {
-          totalBalance -= txn.amount;
-        }
-
         // Monthly stats
         if (txn.date.isAfter(startOfMonth)) {
           if (txn.type == 'credit') {
@@ -80,6 +105,16 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             monthlyExpenses += txn.amount;
           }
         }
+      }
+
+      // Calculate all-time total balance (stable value)
+      // Read from app state/config to get consistent balance
+      // This prevents recalculating balance from transactions every time
+      double totalBalance = await _getConsistentTotalBalance();
+      // If total balance not set yet, calculate from transactions
+      if (totalBalance == 0 && transactions.isNotEmpty) {
+        totalBalance = _calculateTotalBalanceFromTransactions(transactions);
+        await _saveTotalBalance(totalBalance);
       }
 
       setState(() {
@@ -255,6 +290,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       color: Colors.white70,
                       fontSize: 14,
                       fontWeight: FontWeight.w500)),
+              const Spacer(),
+              Text(
+                'This Month',
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.8),
+                  fontSize: 12,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 16),
@@ -283,25 +326,16 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 amount: _formatCurrency(_monthlyExpenses),
                 color: AppTheme.accentRed,
               ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Center(
-            child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text(
-                'Monthly Net: QAR${_monthlyBalance.toStringAsFixed(2)}',
+              const Spacer(),
+              Text(
+                'QAR${(_monthlyIncome - _monthlyExpenses).toStringAsFixed(2)}',
                 style: const TextStyle(
-                  color: Colors.white70,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
-            ),
+            ],
           ),
         ],
       ),
@@ -545,75 +579,151 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       );
     }
 
+    // Group transactions by month
+    final Map<String, List<app_txn.Transaction>> monthGroups = {};
+    for (final txn in _recentTransactions) {
+      final monthYear =
+          '${txn.date.year}-${txn.date.month.toString().padLeft(2, '0')}';
+      monthGroups.putIfAbsent(monthYear, () => []).add(txn);
+    }
+
+    final now = DateTime.now();
+    final currentMonthYear =
+        '${now.year}-${now.month.toString().padLeft(2, '0')}';
+
     return Container(
       decoration: AppTheme.cardDecoration,
       child: Column(
-        children: List.generate(_recentTransactions.length, (i) {
-          final txn = _recentTransactions[i];
-          final isLast = i == _recentTransactions.length - 1;
-          return _buildTxnRow(txn, isLast);
-        }),
+        children: monthGroups.entries.map((entry) {
+          final monthTxns = entry.value;
+          final groupMonthYear = entry.key;
+          final isCurrentMonth = groupMonthYear == currentMonthYear;
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (monthGroups.length > 1)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                  child: Text(
+                    _formatMonthYear(groupMonthYear),
+                    style: TextStyle(
+                      color: isCurrentMonth
+                          ? AppTheme.primaryLight
+                          : AppTheme.textTertiary,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ...List.generate(monthTxns.length, (i) {
+                final txn = monthTxns[i];
+                // Highlight current month transactions
+                return _buildTxnRow(
+                  txn,
+                  isLast: i < monthTxns.length - 1,
+                  highlight: isCurrentMonth,
+                );
+              }),
+            ],
+          );
+        }).toList(),
       ),
     );
   }
 
-  Widget _buildTxnRow(app_txn.Transaction txn, bool isLast) {
+  String _formatMonthYear(String monthYear) {
+    try {
+      final parts = monthYear.split('-');
+      final year = int.parse(parts[0]);
+      final month = int.parse(parts[1]);
+      return DateFormat('MMMM yyyy').format(DateTime(year, month));
+    } catch (e) {
+      return monthYear;
+    }
+  }
+
+  Widget _buildTxnRow(app_txn.Transaction txn,
+      {bool isLast = true, bool highlight = false}) {
     final isCredit = txn.type == 'credit';
     final color = AppTheme.getCategoryColor(txn.category);
 
-    return Padding(
-      padding: EdgeInsets.fromLTRB(16, 14, 16, isLast ? 14 : 0),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: color.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(12),
+    return Container(
+      margin: EdgeInsets.only(bottom: isLast ? 0 : 4),
+      decoration: BoxDecoration(
+        color:
+            highlight ? AppTheme.primary.withOpacity(0.05) : Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+        border: highlight
+            ? Border.all(color: AppTheme.primary.withOpacity(0.15))
+            : null,
+      ),
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(16, 12, 16, isLast ? 12 : 8),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: color.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(AppTheme.getCategoryIcon(txn.category),
+                      color: color, size: 20),
                 ),
-                child: Icon(AppTheme.getCategoryIcon(txn.category),
-                    color: color, size: 20),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      txn.description.isNotEmpty
-                          ? txn.description
-                          : 'Transaction',
-                      style: const TextStyle(
-                          color: AppTheme.textPrimary,
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        txn.description.isNotEmpty
+                            ? txn.description
+                            : 'Transaction',
+                        style: TextStyle(
+                          color: highlight
+                              ? AppTheme.textPrimary
+                              : AppTheme.textPrimary,
                           fontSize: 14,
-                          fontWeight: FontWeight.w600),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 3),
-                    Text(txn.category, style: AppTheme.caption),
-                  ],
+                          fontWeight:
+                              highlight ? FontWeight.w600 : FontWeight.w600,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 3),
+                      Text(txn.category,
+                          style: AppTheme.caption.copyWith(
+                            color: highlight
+                                ? AppTheme.textSecondary
+                                : AppTheme.textTertiary,
+                          )),
+                    ],
+                  ),
                 ),
-              ),
-              Text(
-                '${isCredit ? '+' : '-'}QAR${txn.amount.toStringAsFixed(2)}',
-                style: TextStyle(
-                  color: isCredit ? AppTheme.income : AppTheme.expense,
-                  fontSize: 15,
-                  fontWeight: FontWeight.bold,
+                Text(
+                  '${isCredit ? '+' : '-'}QAR${txn.amount.toStringAsFixed(2)}',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: isCredit
+                        ? (highlight ? AppTheme.income : AppTheme.income)
+                        : (highlight ? AppTheme.expense : AppTheme.expense),
+                  ),
                 ),
-              ),
-            ],
-          ),
-          if (!isLast)
-            Padding(
-              padding: const EdgeInsets.only(top: 14, left: 56),
-              child: Divider(height: 1, color: Colors.white.withOpacity(0.05)),
+              ],
             ),
-        ],
+            if (!isLast)
+              Padding(
+                padding: const EdgeInsets.only(top: 12, left: 56),
+                child:
+                    Divider(height: 1, color: Colors.white.withOpacity(0.05)),
+              ),
+          ],
+        ),
       ),
     );
   }

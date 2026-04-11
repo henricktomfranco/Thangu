@@ -77,19 +77,74 @@ class SmsHistoryService {
   Future<int> scanNewSms({bool useAI = true}) async {
     try {
       // Get last transaction date
-      final existingTxn = await _dbService.getTransactions(limit: 1);
+      final existingTxn = await _dbService.getTransactions(
+          limit: 10, startDate: DateTime.now().subtract(Duration(days: 7)));
       DateTime? lastScanTime;
       if (existingTxn.isNotEmpty) {
-        lastScanTime = existingTxn.first.date;
+        lastScanTime = existingTxn
+            .map((t) => t.date)
+            .reduce((a, b) => a.isAfter(b) ? a : b);
       }
 
-      // Load SMS from last 1 day only for new messages
-      final count = await loadHistoricalSms(lastDays: 1, useAI: useAI);
+      // Calculate how many days to scan based on last scan time
+      int daysToScan = 7; // Default to last 7 days
+      if (lastScanTime != null) {
+        final diff = DateTime.now().difference(lastScanTime).inDays;
+        daysToScan = diff > 0 ? diff : 1; // At least scan 1 day
+      }
+
+      if (daysToScan > 7) {
+        daysToScan = 7; // Limit to last 7 days for performance
+        print(
+            '[SmsHistory] Limiting scan to $daysToScan days to prevent excessive loading');
+      }
+
+      print('[SmsHistory] Scanning last $daysToScan days of SMS messages');
+      final count = await loadHistoricalSms(lastDays: daysToScan, useAI: useAI);
       return count;
     } catch (e) {
       print('[SmsHistory] Error scanning new SMS: $e');
       return 0;
     }
+  }
+
+  /// Check if an SMS is a potential financial transaction
+  Future<bool> _isFinancialSms(String body) async {
+    // Expanded patterns for financial transaction detection
+    final patterns = [
+      // Arabic/English patterns for common transaction types
+      'qatar riyal', 'ريال قطري', 'qatar', 'qa', 'amount', 'مبلغ', 'balanc',
+      'debited', 'credited', 'paid', 'withdraw', 'deposit', 'transfer', 'sent',
+      'received',
+      'صرف', 'إيداع', 'إستلام', 'تم صرف', 'تلقيتها', 'التحويل', 'حساب',
+      'رقم الحساب',
+      'card', 'بطاقة', 'transaction', 'عملية', 'otp', 'كلمة سر', 'رمز التأكيد',
+      'top up', 'recharge', 'شحن', 'فودافون', ' الرقم المرجعي', 'reference',
+      // Bank-specific patterns
+      'qnb', 'doha bank', 'commercial bank', 'ahlibank', 'rayyan bank',
+      'masraf', 'بنك', 'دبي الإسلامي', 'الإسلامي', 'المركزي', 'البنك',
+    ];
+
+    // Check if any pattern exists in the message
+    final lowerBody = body.toLowerCase();
+
+    // If any banking pattern is found, consider it financial
+    for (final pattern in patterns) {
+      if (lowerBody.contains(pattern)) return true;
+    }
+
+    // Specific amount detection
+    // Detect patterns like "1,000.00 QAR", "QR 50.00", "50 QR", "ريال ١٠٠" etc.
+    final amountPattern = RegExp(
+        r'(\d{1,3},?\d{0,3}\.\d{2}|\d{1,5}\.\d{2}|ريال\s?\d+|\d+\s?(ريال|qr|qar))',
+        caseSensitive: false);
+
+    if (amountPattern.hasMatch(body)) {
+      return true;
+    }
+
+    // If none of the patterns match, it's likely not a financial SMS
+    return false;
   }
 
   /// Load historical SMS messages and save to database

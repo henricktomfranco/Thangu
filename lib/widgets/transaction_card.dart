@@ -114,7 +114,7 @@ class TransactionCard extends StatelessWidget {
             ),
             // Amount
             Text(
-              '${isCredit ? '+' : '-'}\$${transaction.amount.toStringAsFixed(2)}',
+              '${isCredit ? '+' : '-'}QAR${transaction.amount.toStringAsFixed(2)}',
               style: TextStyle(
                 fontSize: 15,
                 fontWeight: FontWeight.bold,
