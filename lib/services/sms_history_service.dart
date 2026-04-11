@@ -566,4 +566,4 @@ class SmsHistoryService {
   }
 
   int min(int a, int b) => a < b ? a : b;
-
+}

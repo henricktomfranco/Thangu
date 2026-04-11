@@ -25,7 +25,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   List<SavingsGoal> _goals = [];
   double _totalBalance = 0; // All-time cumulative balance
   double _monthlyIncome = 0; // Current month income
-  double _monthlyExpenses = 0; // Current month expenses
+  double _spentAmount = 0; // Money spent this month
   bool _isLoading = true;
   int _currentNavIndex = 0;
 
@@ -101,7 +101,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           if (txn.type == 'credit') {
             monthlyIncome += txn.amount;
           } else {
-            monthlyExpenses += txn.amount;
+            // Track money spent
+            _spentAmount += txn.amount;
           }
         }
       }
@@ -121,7 +122,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         _goals = goals;
         _totalBalance = totalBalance;
         _monthlyIncome = monthlyIncome;
-        _monthlyExpenses = monthlyExpenses;
+        _spentAmount = _spentAmount;
         _isLoading = false;
       });
       _fadeController.forward();
@@ -260,13 +261,29 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   // ─── Balance Card ──────────────────────────────────────────
   Widget _buildBalanceCard() {
+    // Calculate remaining budget (monthly focus)
+    final remainingBudget = _monthlyIncome - _spentAmount;
+    final savingsPercentage = _monthlyIncome > 0
+        ? ((remainingBudget / _monthlyIncome) * 100).toInt()
+        : 0;
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        gradient: AppTheme.balanceGradient,
+        gradient: remainingBudget >= 0
+            ? AppTheme.balanceGradient
+            : LinearGradient(
+                colors: [
+                  AppTheme.accentRed.withOpacity(0.8),
+                  AppTheme.accentRed
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
         borderRadius: BorderRadius.circular(AppTheme.radiusXl),
-        boxShadow: AppTheme.glowShadow(AppTheme.primary),
+        boxShadow: AppTheme.glowShadow(
+            remainingBudget >= 0 ? AppTheme.primary : AppTheme.accentRed),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -279,39 +296,44 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   color: Colors.white.withOpacity(0.2),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Icon(Icons.account_balance_wallet,
-                    color: Colors.white, size: 18),
+                child: Icon(
+                    savingsPercentage >= 20
+                        ? Icons.savings_rounded
+                        : Icons.pie_chart_rounded,
+                    color: Colors.white,
+                    size: 18),
               ),
               const SizedBox(width: 10),
-              const Text('Total Balance',
+              Text('Monthly Budget',
                   style: TextStyle(
-                      color: Colors.white70,
+                      color: Colors.white.withOpacity(0.9),
                       fontSize: 14,
                       fontWeight: FontWeight.w500)),
               const Spacer(),
               Text(
-                'This Month',
+                '${savingsPercentage >= 0 ? '+' : ''}$savingsPercentage%',
                 style: TextStyle(
-                  color: Colors.white.withOpacity(0.8),
+                  color: remainingBudget >= 0 ? Colors.white : Colors.white,
                   fontSize: 12,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
             ],
           ),
           const SizedBox(height: 16),
-          // Current Bank Balance (Total Net Worth)
+          // Current Month Overview
           MediaQuery.of(context).size.width < 360
               ? Text(
-                  'QAR${_totalBalance.toStringAsFixed(2)}',
+                  'QAR${_monthlyIncome.toStringAsFixed(2)}',
                   style: TextStyle(
                     color: Colors.white,
-                    fontSize: 32, // Responsive font size
+                    fontSize: 32,
                     fontWeight: FontWeight.bold,
                     letterSpacing: -0.5,
                   ),
                 )
               : Text(
-                  'QAR${_totalBalance.toStringAsFixed(2)}',
+                  'QAR${_monthlyIncome.toStringAsFixed(2)}',
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 38,
@@ -319,32 +341,111 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     letterSpacing: -1,
                   ),
                 ),
+          const SizedBox(height: 6),
+          Text('Monthly Income',
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.8),
+                fontSize: 14,
+              )),
           const SizedBox(height: 20),
+          // Monthly Budget Progress
           Row(
             children: [
-              _buildBalancePill(
-                icon: Icons.arrow_upward_rounded,
-                label: 'Income',
-                amount: _formatCurrency(_monthlyIncome),
-                color: AppTheme.accentGreen,
+              _buildBudgetProgressBar(),
+            ],
+          ),
+          const SizedBox(height: 16),
+          // Monthly Highlights
+          Row(
+            children: [
+              Expanded(
+                child: _buildBudgetStats(
+                  icon: Icons.account_balance_wallet_rounded,
+                  label: 'Budget'
+                      '${remainingBudget >= 0 ? ' Remaining' : ' Used'}',
+                  amount: 'QAR${remainingBudget.abs().toStringAsFixed(2)}',
+                  color: remainingBudget >= 0
+                      ? AppTheme.accentGreen
+                      : AppTheme.accentRed,
+                ),
               ),
               const SizedBox(width: 12),
-              _buildBalancePill(
-                icon: Icons.arrow_downward_rounded,
-                label: 'Expenses',
-                amount: _formatCurrency(_monthlyExpenses),
-                color: AppTheme.accentRed,
-              ),
-              const Spacer(),
-              Text(
-                'QAR${(_monthlyIncome - _monthlyExpenses).toStringAsFixed(2)}',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
+              Expanded(
+                child: _buildBudgetStats(
+                  icon: Icons.track_changes_rounded,
+                  label: 'Your Goal',
+                  amount:
+                      '${savingsPercentage > 25 ? "Excellent!" : savingsPercentage > 10 ? "Getting There!" : "Push More!"}',
+                  color: AppTheme.primaryLight,
                 ),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBudgetProgressBar() {
+    final remainingBudget = _monthlyIncome - _spentAmount;
+    final progress =
+        _monthlyIncome > 0 ? remainingBudget / _monthlyIncome : 0.0;
+
+    return Row(
+      children: [
+        Expanded(
+          child: LinearProgressIndicator(
+            value: progress.clamp(0.0, 1.0),
+            backgroundColor: Colors.white.withOpacity(0.1),
+            valueColor: AlwaysStoppedAnimation<Color>(
+              progress >= 0.5
+                  ? AppTheme.accentGreen
+                  : progress >= 0.2
+                      ? AppTheme.accentOrange
+                      : AppTheme.accentRed,
+            ),
+            minHeight: 6,
+            borderRadius: BorderRadius.circular(4),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBudgetStats({
+    required IconData icon,
+    required String label,
+    required String amount,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+        border: Border.all(color: color.withOpacity(0.2)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: color, size: 18),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label,
+                    style: TextStyle(
+                        color: color,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500)),
+                Text(amount,
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600)),
+              ],
+            ),
           ),
         ],
       ),
@@ -399,7 +500,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   // ─── Income / Expense Row ──────────────────────────────────
   Widget _buildIncomeExpenseRow() {
-    final savings = _monthlyIncome - _monthlyExpenses;
+    final savings = _monthlyIncome - _spentAmount;
     final savingsRate =
         _monthlyIncome > 0 ? (savings / _monthlyIncome * 100) : 0.0;
 
