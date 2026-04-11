@@ -565,55 +565,6 @@ class SmsHistoryService {
     return 'Other';
   }
 
-  /// Detect if SMS is a financial transaction using AI
-  Future<bool> _isFinancialSms(String smsBody) async {
-    // First, check for keyword patterns
-    final lowerBody = smsBody.toLowerCase();
-
-    // Strong financial keywords
-    if (lowerBody.contains('debit card') ||
-        lowerBody.contains('credit card') ||
-        lowerBody.contains('was used for') ||
-        lowerBody.contains('balance') ||
-        lowerBody.contains('transaction') ||
-        lowerBody.contains('amount') ||
-        lowerBody.contains('credited') ||
-        lowerBody.contains('debited') ||
-        lowerBody.contains('payment') ||
-        lowerBody.contains('transfer') ||
-        lowerBody.contains('received') ||
-        lowerBody.contains('spent') ||
-        lowerBody.contains('purchase') ||
-        lowerBody.contains('withdrawal')) {
-      return true;
-    }
-
-    // Check for currency amounts
-    if (RegExp(r'(?:Rs\.?|INR|₹|QAR|AED|SAR|USD|\$|EUR|€|GBP|£)\s*[0-9]',
-            caseSensitive: false)
-        .hasMatch(smsBody)) {
-      return true;
-    }
-
-    // If no strong keywords, try AI detection
-    try {
-      final prompt =
-          '''Is this an SMS message about a financial transaction (bank, credit card, payment, transfer, etc.)?
-Message: "$smsBody"
-Reply with just "yes" or "no".''';
-
-      final result = await _aiService.generateResponse(prompt);
-      final response = result.toLowerCase().trim();
-
-      final isFinancial = response.contains('yes');
-      print('[SmsHistory] AI detection for financial SMS: $isFinancial');
-      return isFinancial;
-    } catch (e) {
-      print('[SmsHistory] AI detection failed, using keyword matching: $e');
-      // If AI fails, use keyword matching as fallback
-      return false;
-    }
-  }
 }
 
 int min(int a, int b) => a < b ? a : b;

@@ -26,7 +26,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   double _totalBalance = 0; // All-time cumulative balance
   double _monthlyIncome = 0; // Current month income
   double _monthlyExpenses = 0; // Current month expenses
-  double _monthlyBalance = 0; // Current month net (income - expenses)
   bool _isLoading = true;
   int _currentNavIndex = 0;
 
@@ -123,7 +122,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         _totalBalance = totalBalance;
         _monthlyIncome = monthlyIncome;
         _monthlyExpenses = monthlyExpenses;
-        _monthlyBalance = monthlyIncome - monthlyExpenses;
         _isLoading = false;
       });
       _fadeController.forward();
@@ -301,15 +299,25 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             ],
           ),
           const SizedBox(height: 16),
-          Text(
-            'QAR${_totalBalance.toStringAsFixed(2)}',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 38,
-              fontWeight: FontWeight.bold,
-              letterSpacing: -1,
-            ),
-          ),
+          MediaQuery.of(context).size.width < 360
+              ? Text(
+                  'QAR${_totalBalance.toStringAsFixed(2)}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 32, // Reduced for small screens
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: -0.5,
+                  ),
+                )
+              : Text(
+                  'QAR${_totalBalance.toStringAsFixed(2)}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 38,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: -1,
+                  ),
+                ),
           const SizedBox(height: 20),
           Row(
             children: [
@@ -455,78 +463,130 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   // ─── Quick Actions ─────────────────────────────────────────
   Widget _buildQuickActions() {
+    final screenWidth = MediaQuery.of(context).size.width;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text('Quick Actions', style: AppTheme.heading3),
         const SizedBox(height: 14),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            _buildActionItem(
-              Icons.receipt_long_rounded,
-              'Transactions',
-              AppTheme.accent,
-              () => _navigateTo(const TransactionsScreen()),
-            ),
-            _buildActionItem(
-              Icons.savings_rounded,
-              'Goals',
-              AppTheme.accentGreen,
-              () => _navigateTo(const GoalsScreen()),
-            ),
-            _buildActionItem(
-              Icons.auto_awesome_rounded,
-              'AI Chat',
-              AppTheme.primaryLight,
-              () => _navigateTo(const AiChatScreen()),
-            ),
-            _buildActionItem(
-              Icons.analytics_rounded,
-              'Analytics',
-              AppTheme.accentOrange,
-              () => _navigateTo(const AnalyticsScreen()),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            _buildActionItem(
-              Icons.settings_rounded,
-              'Settings',
-              AppTheme.textTertiary,
-              () => _navigateTo(const SettingsScreen()),
-            ),
-          ],
-        ),
+        screenWidth < 380
+            ? Column(
+                children: [
+                  // For small screens, use 2-row layout
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      _buildActionItem(
+                        Icons.receipt_long_rounded,
+                        'Transactions',
+                        AppTheme.accent,
+                        () => _navigateTo(const TransactionsScreen()),
+                      ),
+                      _buildActionItem(
+                        Icons.savings_rounded,
+                        'Goals',
+                        AppTheme.accentGreen,
+                        () => _navigateTo(const GoalsScreen()),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      _buildActionItem(
+                        Icons.auto_awesome_rounded,
+                        'AI Chat',
+                        AppTheme.primaryLight,
+                        () => _navigateTo(const AiChatScreen()),
+                      ),
+                      _buildActionItem(
+                        Icons.analytics_rounded,
+                        'Analytics',
+                        AppTheme.accentOrange,
+                        () => _navigateTo(const AnalyticsScreen()),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  _buildActionItem(
+                    Icons.settings_rounded,
+                    'Settings',
+                    AppTheme.textTertiary,
+                    () => _navigateTo(const SettingsScreen()),
+                  ),
+                ],
+              )
+            : Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  // For larger screens, use single row
+                  _buildActionItem(
+                    Icons.receipt_long_rounded,
+                    'Transactions',
+                    AppTheme.accent,
+                    () => _navigateTo(const TransactionsScreen()),
+                  ),
+                  _buildActionItem(
+                    Icons.savings_rounded,
+                    'Goals',
+                    AppTheme.accentGreen,
+                    () => _navigateTo(const GoalsScreen()),
+                  ),
+                  _buildActionItem(
+                    Icons.auto_awesome_rounded,
+                    'AI Chat',
+                    AppTheme.primaryLight,
+                    () => _navigateTo(const AiChatScreen()),
+                  ),
+                  _buildActionItem(
+                    Icons.analytics_rounded,
+                    'Analytics',
+                    AppTheme.accentOrange,
+                    () => _navigateTo(const AnalyticsScreen()),
+                  ),
+                ],
+              ),
+        const SizedBox(height: 4), // Reduced spacing
       ],
     );
   }
 
   Widget _buildActionItem(
       IconData icon, String label, Color color, VoidCallback onTap) {
+    final screenWidth = MediaQuery.of(context).size.width;
+
     return GestureDetector(
       onTap: onTap,
-      child: Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-              border: Border.all(color: color.withOpacity(0.15)),
+      child: SizedBox(
+        width: screenWidth < 380 ? 80 : 90, // Fixed width for consistency
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(14), // Slightly reduced
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+                border: Border.all(color: color.withOpacity(0.15)),
+              ),
+              child: Icon(icon, color: color, size: 24), // Reduced size
             ),
-            child: Icon(icon, color: color, size: 26),
-          ),
-          const SizedBox(height: 8),
-          Text(label,
-              style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                  color: AppTheme.textSecondary)),
-        ],
+            const SizedBox(height: 6), // Reduced spacing
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: screenWidth < 360 ? 11 : 12, // Dynamic font size
+                fontWeight: FontWeight.w500,
+                color: AppTheme.textSecondary,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -647,6 +707,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       {bool isLast = true, bool highlight = false}) {
     final isCredit = txn.type == 'credit';
     final color = AppTheme.getCategoryColor(txn.category);
+    final screenWidth = MediaQuery.of(context).size.width;
+
+    // Get formatted date
+    final dateText = DateFormat('MMM d').format(txn.date);
 
     return Container(
       margin: EdgeInsets.only(bottom: isLast ? 0 : 4),
@@ -659,66 +723,95 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             : null,
       ),
       child: Padding(
-        padding: EdgeInsets.fromLTRB(16, 12, 16, isLast ? 12 : 8),
+        padding:
+            EdgeInsets.fromLTRB(14, 10, 14, isLast ? 10 : 8), // Reduced padding
         child: Column(
           children: [
             Row(
               children: [
                 Container(
-                  width: 42,
-                  height: 42,
+                  width: 38, // Reduced size
+                  height: 38, // Reduced size
                   decoration: BoxDecoration(
                     color: color.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(10), // Slightly smaller
                   ),
                   child: Icon(AppTheme.getCategoryIcon(txn.category),
-                      color: color, size: 20),
+                      color: color, size: 18), // Reduced icon
                 ),
-                const SizedBox(width: 14),
+                const SizedBox(width: 12), // Reduced spacing
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        txn.description.isNotEmpty
-                            ? txn.description
-                            : 'Transaction',
-                        style: TextStyle(
-                          color: highlight
-                              ? AppTheme.textPrimary
-                              : AppTheme.textPrimary,
-                          fontSize: 14,
-                          fontWeight:
-                              highlight ? FontWeight.w600 : FontWeight.w600,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          // Description
+                          Expanded(
+                            child: Text(
+                              txn.description.isNotEmpty
+                                  ? txn.description
+                                  : 'Transaction',
+                              style: TextStyle(
+                                fontSize:
+                                    screenWidth < 360 ? 13 : 14, // Responsive
+                                fontWeight: highlight
+                                    ? FontWeight.w600
+                                    : FontWeight.w600,
+                                color: AppTheme.textPrimary,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          // Category
+                          Text(
+                            txn.category,
+                            style: AppTheme.caption.copyWith(
+                              color: highlight
+                                  ? AppTheme.textSecondary
+                                  : AppTheme.textTertiary,
+                              fontSize: 11, // Smaller
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 3),
-                      Text(txn.category,
-                          style: AppTheme.caption.copyWith(
-                            color: highlight
-                                ? AppTheme.textSecondary
-                                : AppTheme.textTertiary,
-                          )),
+                      const SizedBox(height: 2), // Reduced
+                      // Amount and date
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            dateText,
+                            style: TextStyle(
+                              color: AppTheme.textTertiary,
+                              fontSize: 11, // Smaller
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            '${isCredit ? '+' : '-'}QAR${txn.amount.toStringAsFixed(2)}',
+                            style: TextStyle(
+                              fontSize:
+                                  screenWidth < 360 ? 13 : 14, // Responsive
+                              fontWeight: FontWeight.bold,
+                              color:
+                                  isCredit ? AppTheme.income : AppTheme.expense,
+                            ),
+                          ),
+                        ],
+                      ),
                     ],
-                  ),
-                ),
-                Text(
-                  '${isCredit ? '+' : '-'}QAR${txn.amount.toStringAsFixed(2)}',
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.bold,
-                    color: isCredit
-                        ? (highlight ? AppTheme.income : AppTheme.income)
-                        : (highlight ? AppTheme.expense : AppTheme.expense),
                   ),
                 ),
               ],
             ),
             if (!isLast)
               Padding(
-                padding: const EdgeInsets.only(top: 12, left: 56),
+                padding:
+                    const EdgeInsets.only(top: 8, left: 54), // Reduced padding
                 child:
                     Divider(height: 1, color: Colors.white.withOpacity(0.05)),
               ),
@@ -876,8 +969,17 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         ),
       ),
       child: SafeArea(
+        top: false,
+        bottom: true,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom > 0
+                ? MediaQuery.of(context).viewInsets.bottom
+                : 8, // Adjust for keyboard
+            top: 8,
+            left: 16,
+            right: 16,
+          ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
