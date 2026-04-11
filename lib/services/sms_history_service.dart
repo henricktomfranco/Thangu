@@ -565,6 +565,5 @@ class SmsHistoryService {
     return 'Other';
   }
 
-}
+  int min(int a, int b) => a < b ? a : b;
 
-int min(int a, int b) => a < b ? a : b;
