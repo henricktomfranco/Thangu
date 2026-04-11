@@ -2,7 +2,7 @@ name: thangu
 
 description: AI-based finance manager app that reads SMS and categorizes transactions
 
-publish_to: 'none'
+# publish_to: 'none'
 
 version: 1.0.2+3
 
