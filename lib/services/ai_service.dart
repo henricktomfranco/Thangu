@@ -370,4 +370,107 @@ Keep your response friendly, encouraging, and under 150 words.
       return "Your expenses exceed your income. Review your spending categories to identify areas where you can cut back. Even small changes can make a big difference.";
     }
   }
+
+  /// Generate personalized savings plan suggestions
+  Future<String> getSavingsPlan({
+    required double monthlyIncome,
+    required double monthlyExpenses,
+    required List<Transaction> recentTransactions,
+    required List<String> userGoals,
+  }) async {
+    try {
+      final double savings = monthlyIncome - monthlyExpenses;
+      final double savingsRate =
+          monthlyIncome > 0 ? (savings / monthlyIncome * 100) : 0;
+
+      final categoryBreakdown =
+          _summarizeRecentTransactions(recentTransactions);
+
+      final String prompt = '''
+You are Thangu, an expert financial planner AI. Create a personalized savings plan for the user.
+
+USER'S FINANCIAL DATA:
+- Monthly Income: QAR${monthlyIncome.toStringAsFixed(2)}
+- Monthly Expenses: QAR${monthlyExpenses.toStringAsFixed(2)}
+- Current Savings Rate: ${savingsRate.toStringAsFixed(1)}%
+- User's Goals: ${userGoals.isEmpty ? "None specified" : userGoals.join(", ")}
+
+SPENDING BREAKDOWN:
+$categoryBreakdown
+
+TASKS:
+1. Recommend a realistic savings plan using the 50/30/20 rule as a guideline
+2. Suggest specific amount to save monthly (QAR)
+3. Identify top 2-3 spending categories to reduce
+4. Provide actionable steps to achieve their goals
+5. If they have goals, calculate monthly savings needed
+
+FORMAT:
+- Use bullet points for clarity
+- Keep it encouraging but realistic
+- Include specific numbers and percentages
+- Maximum 200 words
+
+User's message: "${userGoals.isEmpty ? "I want to save more money" : userGoals.first}"
+''';
+
+      final response = await generateResponse(prompt);
+      return response;
+    } catch (e) {
+      return _getFallbackAdvice(monthlyIncome, monthlyExpenses);
+    }
+  }
+
+  /// Analyze spending patterns and provide insights
+  Future<String> analyzeSpendingPatterns({
+    required List<Transaction> transactions,
+  }) async {
+    try {
+      if (transactions.isEmpty) {
+        return "Start tracking your transactions to get personalized spending insights!";
+      }
+
+      final categoryTotals = <String, double>{};
+      for (final txn in transactions.where((t) => t.type == 'debit')) {
+        categoryTotals.update(txn.category, (value) => value + txn.amount,
+            ifAbsent: () => txn.amount);
+      }
+
+      if (categoryTotals.isEmpty) {
+        return "No expense transactions found yet. Add your first transaction!";
+      }
+
+      final sortedCategories = categoryTotals.entries.toList()
+        ..sort((a, b) => b.value.compareTo(a.value));
+
+      final totalExpenses =
+          categoryTotals.values.fold<double>(0, (a, b) => a + b);
+
+      final StringBuffer analysis = StringBuffer();
+      analysis.writeln("📊 Spending Analysis:\n");
+      analysis.writeln(
+          "*Total Expenses:* QAR ${totalExpenses.toStringAsFixed(2)}\n");
+      analysis.writeln("*Top Categories:*");
+
+      for (var i = 0; i < sortedCategories.length && i < 5; i++) {
+        final category = sortedCategories[i];
+        final percentage = (category.value / totalExpenses * 100);
+        analysis.writeln(
+            "- ${category.key}: QAR ${category.value.toStringAsFixed(2)} (${percentage.toStringAsFixed(1)}%)");
+      }
+
+      if (sortedCategories.isNotEmpty) {
+        final topCategory = sortedCategories.first;
+        final topPercentage = (topCategory.value / totalExpenses * 100);
+        if (topPercentage > 30) {
+          analysis.writeln(
+              "\n💡 *Insight:* ${topCategory.key} takes up ${topPercentage.toStringAsFixed(1)}% of spending. Consider reviewing this category for potential savings.");
+        }
+      }
+
+      return analysis.toString();
+    } catch (e) {
+      return "Unable to analyze spending patterns right now.";
+    }
+  }
 }

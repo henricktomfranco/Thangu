@@ -3,6 +3,9 @@ import '../app_theme.dart';
 import '../services/ai_service.dart';
 import '../models/transaction.dart';
 import '../services/database_service.dart';
+import '../models/goal.dart';
+import 'goals_screen.dart';
+import 'add_transaction_screen.dart';
 
 class AiChatScreen extends StatefulWidget {
   const AiChatScreen({super.key});
@@ -18,6 +21,7 @@ class _AiChatScreenState extends State<AiChatScreen>
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final List<Map<String, dynamic>> _messages = [];
+  final List<Map<String, dynamic>> _conversationHistory = [];
   bool _isLoading = false;
   bool _isInitialized = false;
 
@@ -44,10 +48,11 @@ class _AiChatScreenState extends State<AiChatScreen>
   Future<void> _initializeChat() async {
     setState(() => _isLoading = true);
     try {
-      // Initialize AI service with saved settings
       await _aiService.initialize();
 
-      final transactions = await _dbService.getTransactions(limit: 20);
+      final transactions = await _dbService.getTransactions(limit: 50);
+      final goals = await _dbService.getGoals();
+
       double monthlyIncome = 0, monthlyExpenses = 0;
       final now = DateTime.now();
       final startOfMonth = DateTime(now.year, now.month, 1);
@@ -70,7 +75,7 @@ class _AiChatScreenState extends State<AiChatScreen>
 
       setState(() {
         _messages.add({
-          'text': advice,
+          'text': "Hi! I'm Thangu, your AI finance assistant 🤖\n\n$advice",
           'isUser': false,
           'timestamp': DateTime.now(),
         });
@@ -83,7 +88,7 @@ class _AiChatScreenState extends State<AiChatScreen>
         _isInitialized = true;
         _messages.add({
           'text':
-              "Hi! I'm Thangu, your AI finance assistant 🤖\n\nI'm having trouble connecting right now, but I can still help you track transactions and savings goals!",
+              "Hi! I'm Thangu, your AI finance assistant 🤖\n\nI can help you with:\n• Viewing transactions & spending patterns\n• Creating & tracking savings goals\n• Budget planning & financial advice\n• Adding new transactions\n\nWhat would you like to know?",
           'isUser': false,
           'timestamp': DateTime.now(),
         });
@@ -107,19 +112,122 @@ class _AiChatScreenState extends State<AiChatScreen>
     _scrollToBottom();
 
     try {
-      // Ensure AI service is initialized with latest settings
       await _aiService.initialize();
 
-      final prompt = '''
-      You are Thangu, a friendly and helpful AI finance assistant. The user asked: "$text"
-      
-      Be helpful, concise, and friendly in your response. If the question is about finances, provide specific advice based on the data available.
-      ''';
+      final transactions = await _dbService.getTransactions(limit: 50);
+      final goals = await _dbService.getGoals();
 
-      final response = await _aiService.generateResponse(prompt);
+      double totalBalance = 0;
+      double monthlyIncome = 0, monthlyExpenses = 0;
+      final now = DateTime.now();
+      final startOfMonth = DateTime(now.year, now.month, 1);
+
+      for (final txn in transactions) {
+        if (txn.type == 'credit') {
+          totalBalance += txn.amount;
+        } else {
+          totalBalance -= txn.amount;
+        }
+        if (txn.date.isAfter(startOfMonth)) {
+          if (txn.type == 'credit') {
+            monthlyIncome += txn.amount;
+          } else {
+            monthlyExpenses += txn.amount;
+          }
+        }
+      }
+
+      final savingsRate = monthlyIncome > 0
+          ? ((monthlyIncome - monthlyExpenses) / monthlyIncome * 100)
+          : 0;
+
+      final contextPrompt = '''
+You are Thangu, an AI finance assistant with access to the user's financial data.
+
+CURRENT FINANCIAL SNAPSHOT:
+- Total Balance: QAR ${totalBalance.toStringAsFixed(2)}
+- Monthly Income: QAR ${monthlyIncome.toStringAsFixed(2)}
+- Monthly Expenses: QAR ${monthlyExpenses.toStringAsFixed(2)}
+- Savings Rate: ${savingsRate.toStringAsFixed(1)}%
+- Active Savings Goals: ${goals.length}
+- Recent Transactions: ${transactions.length}
+
+TOP SPENDING CATEGORIES (This Month):
+${_getCategoryBreakdown(transactions)}
+
+SAVINGS GOALS:
+${_getGoalsSummary(goals)}
+
+INSTRUCTIONS:
+1. Answer questions about their finances using the data above
+2. Suggest creating new goals when appropriate
+3. Recommend budget improvements based on spending patterns
+4. If they ask to add a transaction or goal, say "I can help you with that" and describe what to do
+5. Keep responses friendly, concise, and actionable
+6. Remember past context from our conversation
+
+CAPABILITIES:
+- View transactions and spending patterns
+- Create and track savings goals  
+- Add new transactions manually
+- Provide budget and savings advice
+- Answer financial questions
+
+User's message: "$text"
+''';
+
+      final List<Map<String, dynamic>> contextMessages =
+          _conversationHistory.take(5).toList();
+
+      final lowerText = text.toLowerCase();
+      String response;
+
+      if (lowerText.contains('saving') ||
+          lowerText.contains('budget') ||
+          lowerText.contains('plan')) {
+        final userGoals = goals.map((g) => g.name).toList();
+        response = await _aiService.getSavingsPlan(
+          monthlyIncome: monthlyIncome,
+          monthlyExpenses: monthlyExpenses,
+          recentTransactions: transactions,
+          userGoals: userGoals,
+        );
+      } else if (lowerText.contains('spending') ||
+          lowerText.contains('spend') ||
+          lowerText.contains('category') ||
+          lowerText.contains('breakdown') ||
+          lowerText.contains('analysis')) {
+        response = await _aiService.analyzeSpendingPatterns(
+            transactions: transactions);
+      } else {
+        String fullPrompt = contextMessages.isEmpty
+            ? contextPrompt
+            : '$contextPrompt\n\nConversation History:\n${contextMessages.map((m) => '${m['isUser'] ? "User" : "Assistant"}: ${m['text']}').join('\n')}\n\nUser\'s message: "$text"';
+
+        response = await _aiService.generateResponse(fullPrompt);
+      }
 
       if (mounted) {
         setState(() {
+          _conversationHistory.add({
+            'text': text,
+            'isUser': true,
+            'timestamp': DateTime.now(),
+          });
+
+          _conversationHistory.add({
+            'text': response.isNotEmpty
+                ? response
+                : "I'm here to help! Ask me anything about your finances.",
+            'isUser': false,
+            'timestamp': DateTime.now(),
+          });
+
+          if (_conversationHistory.length > 10) {
+            _conversationHistory.removeRange(
+                0, _conversationHistory.length - 10);
+          }
+
           _messages.add({
             'text': response.isNotEmpty
                 ? response
@@ -145,6 +253,35 @@ class _AiChatScreenState extends State<AiChatScreen>
         _scrollToBottom();
       }
     }
+  }
+
+  String _getCategoryBreakdown(List<Transaction> transactions) {
+    if (transactions.isEmpty) return 'No transactions yet';
+
+    final Map<String, double> categories = {};
+    for (final txn in transactions.where((t) => t.type == 'debit')) {
+      categories.update(txn.category, (value) => value + txn.amount,
+          ifAbsent: () => txn.amount);
+    }
+
+    if (categories.isEmpty) return 'No expense transactions';
+
+    final sorted = categories.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    return sorted
+        .take(5)
+        .map((e) => '- ${e.key}: QAR ${e.value.toStringAsFixed(2)}')
+        .join('\n');
+  }
+
+  String _getGoalsSummary(List<SavingsGoal> goals) {
+    if (goals.isEmpty) return 'No active goals';
+
+    return goals
+        .map((g) =>
+            '- ${g.name}: QAR ${g.currentAmount.toStringAsFixed(0)} / QAR ${g.targetAmount.toStringAsFixed(0)} (${(g.progressPercentage * 100).toInt()}%)')
+        .join('\n');
   }
 
   void _scrollToBottom() {
@@ -351,6 +488,111 @@ class _AiChatScreenState extends State<AiChatScreen>
     );
   }
 
+  Widget _buildQuickActions() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        border: Border(
+          top: BorderSide(color: Colors.white.withOpacity(0.06)),
+        ),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Row(
+          children: [
+            _buildQuickActionChip(
+              icon: Icons.savings_rounded,
+              label: 'New Goal',
+              color: AppTheme.accentGreen,
+              onTap: () => _navigateToAddGoal(),
+            ),
+            const SizedBox(width: 8),
+            _buildQuickActionChip(
+              icon: Icons.add_circle_outline_rounded,
+              label: 'Add Transaction',
+              color: AppTheme.accent,
+              onTap: () => _navigateToAddTransaction(),
+            ),
+            const SizedBox(width: 8),
+            _buildQuickActionChip(
+              icon: Icons.analytics_rounded,
+              label: 'My Spending',
+              color: AppTheme.accentOrange,
+              onTap: () {
+                _messageController.text = 'Show me my spending breakdown';
+                _sendMessage();
+              },
+            ),
+            const SizedBox(width: 8),
+            _buildQuickActionChip(
+              icon: Icons.lightbulb_outline_rounded,
+              label: 'Tips',
+              color: AppTheme.primaryLight,
+              onTap: () {
+                _messageController.text = 'Give me savings tips';
+                _sendMessage();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildQuickActionChip({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.12),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: color.withOpacity(0.2)),
+          ),
+          child: Row(
+            children: [
+              Icon(icon, color: color, size: 18),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    color: color,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _navigateToAddGoal() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const GoalsScreen()),
+    );
+  }
+
+  void _navigateToAddTransaction() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const AddTransactionScreen()),
+    );
+  }
+
   Widget _buildInputBar() {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
@@ -362,39 +604,46 @@ class _AiChatScreenState extends State<AiChatScreen>
       ),
       child: SafeArea(
         top: false,
-        child: Row(
+        child: Column(
           children: [
-            Expanded(
-              child: TextField(
-                controller: _messageController,
-                style: const TextStyle(color: AppTheme.textPrimary),
-                decoration: InputDecoration(
-                  hintText: 'Ask about your finances...',
-                  fillColor: AppTheme.surfaceInput,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(AppTheme.radiusRound),
-                    borderSide: BorderSide.none,
+            _buildQuickActions(),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _messageController,
+                    style: const TextStyle(color: AppTheme.textPrimary),
+                    decoration: InputDecoration(
+                      hintText: 'Ask about your finances...',
+                      fillColor: AppTheme.surfaceInput,
+                      border: OutlineInputBorder(
+                        borderRadius:
+                            BorderRadius.circular(AppTheme.radiusRound),
+                        borderSide: BorderSide.none,
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 12),
+                    ),
+                    onSubmitted: (_) => _sendMessage(),
+                    maxLines: null,
                   ),
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                 ),
-                onSubmitted: (_) => _sendMessage(),
-                maxLines: null,
-              ),
-            ),
-            const SizedBox(width: 10),
-            GestureDetector(
-              onTap: _sendMessage,
-              child: Container(
-                width: 46,
-                height: 46,
-                decoration: BoxDecoration(
-                  gradient: AppTheme.primaryGradient,
-                  borderRadius: BorderRadius.circular(14),
+                const SizedBox(width: 10),
+                GestureDetector(
+                  onTap: _sendMessage,
+                  child: Container(
+                    width: 46,
+                    height: 46,
+                    decoration: BoxDecoration(
+                      gradient: AppTheme.primaryGradient,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Icon(Icons.send_rounded,
+                        color: Colors.white, size: 20),
+                  ),
                 ),
-                child: const Icon(Icons.send_rounded,
-                    color: Colors.white, size: 20),
-              ),
+              ],
             ),
           ],
         ),
