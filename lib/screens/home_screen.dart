@@ -299,19 +299,20 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             ],
           ),
           const SizedBox(height: 16),
+          // Current Bank Balance (Total Net Worth)
           MediaQuery.of(context).size.width < 360
               ? Text(
                   'QAR${_totalBalance.toStringAsFixed(2)}',
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: Colors.white,
-                    fontSize: 32, // Reduced for small screens
+                    fontSize: 32, // Responsive font size
                     fontWeight: FontWeight.bold,
                     letterSpacing: -0.5,
                   ),
                 )
               : Text(
                   'QAR${_totalBalance.toStringAsFixed(2)}',
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: Colors.white,
                     fontSize: 38,
                     fontWeight: FontWeight.bold,
@@ -337,7 +338,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               const Spacer(),
               Text(
                 'QAR${(_monthlyIncome - _monthlyExpenses).toStringAsFixed(2)}',
-                style: const TextStyle(
+                style: TextStyle(
                   color: Colors.white,
                   fontSize: 18,
                   fontWeight: FontWeight.w600,

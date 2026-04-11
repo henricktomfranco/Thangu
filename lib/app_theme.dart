@@ -6,14 +6,14 @@ class AppTheme {
   AppTheme._();
 
   // ─── Brand Colors ───────────────────────────────────────────
-  static const Color primary = Color(0xFF7C4DFF);
-  static const Color primaryLight = Color(0xFFB388FF);
-  static const Color primaryDark = Color(0xFF651FFF);
-  static const Color accent = Color(0xFF00E5FF);
-  static const Color accentGreen = Color(0xFF69F0AE);
-  static const Color accentRed = Color(0xFFFF5252);
-  static const Color accentOrange = Color(0xFFFFAB40);
-  static const Color accentYellow = Color(0xFFFFD740);
+  static const Color primary = Color(0xFF6366F1); // Indigo-600
+  static const Color primaryLight = Color(0xFF818CF8); // Indigo-400
+  static const Color primaryDark = Color(0xFF4F46E5); // Indigo-800
+  static const Color accent = Color(0xFF06B6D4); // Cyan-500
+  static const Color accentGreen = Color(0xFF10B981); // Emerald-500
+  static const Color accentRed = Color(0xFFEF4444); // Red-500
+  static const Color accentOrange = Color(0xFFFB923C); // Orange-400
+  static const Color accentYellow = Color(0xFFEAB308); // Amber-500
 
   // ─── Surface / Background ───────────────────────────────────
   static const Color scaffoldBg = Color(0xFF0D0D1A);
@@ -45,7 +45,7 @@ class AppTheme {
   );
 
   static const LinearGradient balanceGradient = LinearGradient(
-    colors: [Color(0xFF7C4DFF), Color(0xFF00BCD4)],
+    colors: [Color(0xFF6366F1), Color(0xFF06B6D4)], // Indigo to Cyan
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
