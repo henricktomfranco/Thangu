@@ -7,44 +7,64 @@ An intelligent personal finance manager app built with Flutter and Dart that rea
 ### 🤖 AI-Powered Transaction Categorization
 - Automatically reads and parses transaction SMS messages
 - Uses Ollama/Llama2 AI to categorize transactions intelligently
-- Learns from your corrections to improve accuracy over time
-- Fallback to manual categorization when AI is uncertain
+- Filters out OTPs and non-financial messages
+- First run scans full history, subsequent runs only scan new messages
 
 ### 📊 Modern Financial Dashboard
 - Beautiful, intuitive UI with real-time balance overview
+- Account filtering (multiple bank accounts support)
+- Date range selector (This Month, Last 30 Days, Custom)
 - Income/expense tracking with visual indicators
-- Quick access to key features (transactions, goals, AI chat, analytics)
+
+### 🎯 Budget Tracking
+- Set spending limits per category
+- Progress tracking with color-coded alerts (75%, 90%, 100%)
+- Push notifications for budget thresholds
+- Per-category budget management
+
+### 📅 Bill Reminders
+- Create recurring bill reminders
+- Schedule notifications before due dates
+- Support for weekly, monthly, quarterly, yearly recurrence
+- Track upcoming and overdue bills
+
+### 💰 Investment Tracking
+- Track stocks, ETFs, crypto, bonds, mutual funds
+- Portfolio summary with total value
+- Profit/loss calculation per investment
+- Manual entry for holdings
+
+### 💵 Debt/Loan Tracking
+- Track loans and credit
+- Monthly payment tracking
+- Progress towards payoff
+- Interest calculation
 
 ### 🎯 Savings Goal Tracking
 - Set and track multiple financial goals
 - Visual progress bars and percentage completion
 - Target date management with countdowns
-- Categorized goals (Emergency Fund, Vacation, Purchase, etc.)
 
 ### 💬 Thangu AI Assistant
 - Conversational AI named "Thangu" for financial advice
 - Context-aware responses based on your spending patterns
 - Budget optimization tips using proven methods (50/30/20 rule)
-- Personalized savings recommendations
 
 ### 📈 Advanced Analytics & Reporting
 - Visual spending analysis with charts
 - Category breakdown of expenses
 - Daily spending trends
-- Export data for backup or further analysis
+- Search & filter by category
+- Export data with share functionality
 
 ### 🔒 Privacy-Focused
 - All data stored locally on your device
 - No personal financial data leaves your phone
-- Secure SQLite database with encryption-ready architecture
-- Works completely offline (except for optional AI queries)
+- Secure SQLite database
 
 ## Screenshots
 
-![Dashboard](/assets/screenshots/dashboard.png)
-![Transactions](/assets/screenshots/transactions.png)
-![Goals](/assets/screenshots/goals.png)
-![AI Chat](/assets/screenshots/ai_chat.png)
+ ![Dashboard](./assets/screenshots/dashboard.png)
 
 ## Installation
 
@@ -55,7 +75,7 @@ An intelligent personal finance manager app built with Flutter and Dart that rea
 ### Setup
 1. Clone the repository:
    ```bash
-   git clone https://github.com/your-username/Thangu.git
+   git clone https://github.com/henricktomfranco/Thangu.git
    cd Thangu
    ```
 
@@ -67,17 +87,12 @@ An intelligent personal finance manager app built with Flutter and Dart that rea
 3. Set up Ollama (for AI categorization):
    ```bash
    # Install Ollama from https://ollama.ai
-   ollama pull llama2  # Download the Llama 2 model
-   # Ollama runs automatically on localhost:11434
+   ollama pull llama2
    ```
 
 4. Run the app:
    ```bash
-   # For mobile
    flutter run
-   
-   # For web
-   flutter run -d web
    ```
 
 ## Architecture
@@ -86,146 +101,87 @@ An intelligent personal finance manager app built with Flutter and Dart that rea
 lib/
 ├── main.dart              # App entry point
 ├── app_theme.dart         # Centralized theme and styling
-├── models/                # Data models
-│   ├── transaction.dart   # Transaction data class
-│   └── goal.dart          # Savings goal data class
-├── screens/               # UI screens
-│   ├── home_screen.dart   # Main dashboard
+├── models/               # Data models
+│   ├── transaction.dart  # Transaction data class
+│   ├── goal.dart        # Savings goal data class
+│   ├── budget.dart     # Budget tracking
+│   ├── bill_reminder.dart # Bill reminders
+│   ├── investment.dart  # Investment tracking
+│   └── debt.dart        # Debt tracking
+├── screens/              # UI screens
+│   ├── home_screen.dart    # Main dashboard
 │   ├── transactions_screen.dart # Transaction management
 │   ├── goals_screen.dart  # Goal tracking
+│   ├── budget_settings_screen.dart # Budget management
+│   ├── bill_reminders_screen.dart # Bill reminders
+│   ├── investments_screen.dart # Investment tracking
 │   ├── ai_chat_screen.dart # AI chat interface
 │   ├── settings_screen.dart # App settings
-│   ├── analytics_screen.dart # Financial analytics and reporting
-│   └── category_management_screen.dart # Category management
-│   └── category_selector.dart # Category selection UI
-├── services/              # Business logic
-│   ├── sms_service.dart   # SMS parsing simulation
-│   ├── real_sms_service.dart # Real SMS processing (to be implemented)
-│   ├── ai_service.dart    # Ollama AI integration
-│   ├── database_service.dart # Local SQLite storage
-│   └── export_service.dart # Data export/import functionality
-├── widgets/               # Reusable UI components
-│   ├── transaction_card.dart
-│   ├── goal_card.dart
-│   └── ...                # Other UI components
-└── utils/                 # Utility functions
+│   └── analytics_screen.dart # Financial analytics
+└── services/              # Business logic
+    ├── sms_service.dart    # SMS processing
+    ├── ai_service.dart    # Ollama AI integration
+    ├── database_service.dart # Local SQLite storage
+    ├── notification_service.dart # Push notifications
+    └── export_service.dart  # Data export/import
 ```
 
-## AI Configuration
+## Database Tables
 
-The app supports both Ollama (local AI) and OpenAI compatible APIs:
-
-1. **Ollama Setup**:
-   - Install Ollama from https://ollama.ai
-   - Pull a model: `ollama pull llama2` (or mistral, etc.)
-   - Default endpoint: http://127.0.0.1:11434
-
-2. **OpenAI Compatible APIs**:
-   - Set your API endpoint in Settings
-   - Add your API key for authentication
-   - Choose from supported models
+- **transactions**: All financial transactions
+- **goals**: Savings goals tracking
+- **budgets**: Category-based budgets
+- **bill_reminders**: Recurring bill reminders
+- **investments**: Investment holdings
+- **debts**: Loans and credit tracking
 
 ## Features in Detail
 
 ### SMS Transaction Processing
-The app simulates reading SMS messages from banks and financial institutions to extract:
-- Transaction amount
-- Type (credit/debit)
-- Description
-- Sender information
+- Reads SMS from banks and financial institutions
+- Extracts transaction amount, type, description
+- Filters out OTPs and authentication codes
+- First run: scans 90 days of history
+- Subsequent runs: scans only new messages
 
-### AI Categorization
-Using Ollama with Llama 2 model:
-- Analyzes transaction description, amount, and sender
-- Matches transactions to predefined categories
-- Provides confidence scores for categorization
-- Allows manual override when needed
+### Budget Alerts
+- 75% threshold: Warning notification
+- 90% threshold: Critical notification  
+- 100%+ threshold: Exceeded notification
 
-### Savings Goals
-- Create custom goals with target amounts and dates
-- Track progress with visual indicators
-- Automatic calculation of completion percentage
-- Goal categorization for better organization
+### Bill Reminders
+- Schedule notifications X days before due
+- Recurrence: weekly, monthly, quarterly, yearly
+- Push notifications via flutter_local_notifications
 
-### AI Financial Assistant
-- Provides personalized financial advice
-- Analyzes your spending patterns
-- Offers budget optimization suggestions
-- Answers specific financial questions
-
-### Category Management
-- Create and manage custom categories
-- Assign colors and icons to categories
-- Export/import category configurations
-- Backup all financial data
-
-### Analytics & Reporting
-- Visual spending analysis with charts
-- Category breakdown of expenses
-- Daily spending trends
-- Export data for backup or further analysis
-
-## Data Storage
-
-All financial data is stored locally using SQLite:
-- Transactions table: Stores all parsed transactions
-- Goals table: Tracks savings goals and progress
-- Categories table: Custom category definitions
-- No data is sent to external servers (except optional AI queries to your local Ollama instance)
-
-## Customization
-
-### Adding Custom Categories
-1. Go to Settings > Manage Categories
-2. Tap "Add New Category"
-3. Enter your custom category name
-4. Optionally specify an icon and color
-5. Tap "Add Category" to save
-
-### Adjusting AI Sensitivity
-The AI service in `lib/services/ai_service.dart` can be adjusted:
-- Change the `_modelName` to use different Ollama models
-- Modify categorization prompts for better accuracy
-- Adjust confidence thresholds
+### Data Export
+- Export to CSV format
+- Share via system share sheet
+- Include all transactions and settings
 
 ## Development
 
-### Running Tests
-```bash
-flutter test
-```
-
 ### Building for Release
 ```bash
-# Android
+# Android APK
 flutter build apk --release
 
 # iOS
 flutter build ios --release
-
-# Web
-flutter build web
 ```
 
-## Contributing
+## Version History
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
+- v1.0.2: Investment & Debt tracking, category filter, export with share
+- v1.0.1: Budget system, bill reminders, notifications
+- v1.0.0: Initial release with AI categorization
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT License
 
 ## Acknowledgments
 
 - [Flutter](https://flutter.dev/) - UI framework
 - [Ollama](https://ollama.ai/) - Local LLM deployment
-- [Llama 2](https://ai.meta.com/llama/) - AI model
 - [SQLite](https://www.sqlite.org/) - Local database
-- [sqflite](https://pub.dev/packages/sqflite) - Flutter SQLite plugin
-- [charts_flutter](https://pub.dev/packages/charts_flutter) - Charting library
-
----
