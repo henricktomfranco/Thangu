@@ -4,6 +4,7 @@ import 'package:sqflite/sqflite.dart';
 
 import '../models/transaction.dart' as app_transaction;
 import '../models/goal.dart';
+import '../models/budget.dart';
 
 class DatabaseService {
   static final DatabaseService _instance = DatabaseService._internal();
@@ -17,6 +18,7 @@ class DatabaseService {
 
   static const String tableTransactions = 'transactions';
   static const String tableGoals = 'goals';
+  static const String tableBudgets = 'budgets';
 
   // Column names for transactions
   static const String columnId = 'id';
@@ -42,6 +44,16 @@ class DatabaseService {
   static const String columnTargetDate = 'target_date';
   static const String columnGoalCategory = 'category';
   static const String columnGoalIcon = 'icon';
+
+  // Column names for budgets
+  static const String columnBudgetId = 'id';
+  static const String columnBudgetCategory = 'category';
+  static const String columnBudgetLimit = 'limit_amount';
+  static const String columnBudgetSpent = 'spent_amount';
+  static const String columnBudgetPeriodStart = 'period_start';
+  static const String columnBudgetPeriodEnd = 'period_end';
+  static const String columnBudgetEnabled = 'enabled';
+  static const String columnBudgetCreatedAt = 'created_at';
 
   Future<Database> get database async {
     if (_database != null) return _database!;
@@ -86,6 +98,20 @@ class DatabaseService {
         $columnTargetDate TEXT NOT NULL,
         $columnGoalCategory TEXT NOT NULL,
         $columnGoalIcon TEXT NOT NULL
+      )
+    ''');
+
+    // Budgets table for tracking category-based budgets
+    await db.execute('''
+      CREATE TABLE $tableBudgets (
+        $columnBudgetId TEXT PRIMARY KEY,
+        $columnBudgetCategory TEXT NOT NULL,
+        $columnBudgetLimit REAL NOT NULL,
+        $columnBudgetSpent REAL NOT NULL DEFAULT 0,
+        $columnBudgetPeriodStart TEXT NOT NULL,
+        $columnBudgetPeriodEnd TEXT NOT NULL,
+        $columnBudgetEnabled INTEGER NOT NULL DEFAULT 1,
+        $columnBudgetCreatedAt TEXT NOT NULL
       )
     ''');
   }
@@ -193,13 +219,72 @@ class DatabaseService {
 
   Future<int> deleteGoal(String id) async {
     final db = await database;
-    return await db.delete(
-      tableGoals,
-      where: '$columnGoalId = ?',
-      whereArgs: [id],
+    return await db
+        .delete(tableGoals, where: '$columnGoalId = ?', whereArgs: [id]);
+  }
+
+  // ─── Budget Operations ─────────────────────────────────────
+
+  Future<int> insertBudget(Budget budget) async {
+    final db = await database;
+    return await db.insert(tableBudgets, budget.toMap());
+  }
+
+  Future<List<Budget>> getBudgets(
+      {DateTime? startDate, DateTime? endDate}) async {
+    final db = await database;
+    String query = 'SELECT * FROM $tableBudgets WHERE $columnBudgetEnabled = 1';
+
+    if (startDate != null && endDate != null) {
+      query +=
+          ' AND $columnBudgetPeriodStart >= ? AND $columnBudgetPeriodEnd <= ?';
+      final List<Map<String, dynamic>> maps = await db.rawQuery(
+          query, [startDate.toIso8601String(), endDate.toIso8601String()]);
+      return List.generate(maps.length, (i) => Budget.fromMap(maps[i]));
+    }
+
+    final List<Map<String, dynamic>> maps = await db.rawQuery(query);
+    return List.generate(maps.length, (i) => Budget.fromMap(maps[i]));
+  }
+
+  Future<int> updateBudget(Budget budget) async {
+    final db = await database;
+    return await db.update(
+      tableBudgets,
+      budget.toMap(),
+      where: '$columnBudgetId = ?',
+      whereArgs: [budget.id],
     );
   }
 
+  Future<int> deleteBudget(String id) async {
+    final db = await database;
+    return await db
+        .delete(tableBudgets, where: '$columnBudgetId = ?', whereArgs: [id]);
+  }
+
+  /// Get budget by category
+  Future<Budget?> getBudgetByCategory(
+      String category, DateTime periodStart) async {
+    final budgets = await getBudgets();
+    return budgets.where((b) {
+      return b.category == category &&
+          b.periodStart.isAtSameMomentAs(periodStart);
+    }).firstOrNull;
+  }
+
+  /// Update budget spent amount
+  Future<int> updateBudgetSpent(
+      String categoryId, double spent, DateTime periodStart) async {
+    final budget = await getBudgetByCategory(categoryId, periodStart);
+    if (budget != null) {
+      final updated = budget.withSpent(spent);
+      return await updateBudget(updated);
+    }
+    return 0;
+  }
+
+  /// Close database connection (optional cleanup)
   Future<void> close() async {
     final db = await database;
     await db.close();
