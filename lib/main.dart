@@ -6,6 +6,7 @@ import 'screens/home_screen.dart';
 import 'services/sms_history_service.dart';
 import 'services/ai_service.dart';
 import 'services/proactive_ai_service.dart';
+import 'services/notification_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -34,6 +35,16 @@ void main() async {
     print('[Startup] ✓ Proactive AI Service initialized');
   } catch (e) {
     print('[Startup] ✗ Could not initialize AI: $e');
+  }
+
+  // Initialize notification service
+  try {
+    final notifService = NotificationService();
+    await notifService.initialize();
+    await notifService.loadSettings();
+    print('[Startup] ✓ Notification Service initialized');
+  } catch (e) {
+    print('[Startup] ✗ Could not initialize notifications: $e');
   }
 
   // Load historical SMS messages

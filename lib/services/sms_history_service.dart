@@ -6,6 +6,7 @@ import 'package:thangu/services/database_service.dart';
 import 'package:thangu/services/ai_service.dart';
 import 'package:thangu/services/real_sms_service.dart';
 import 'package:thangu/services/account_service.dart';
+import 'package:thangu/services/notification_service.dart';
 
 /// Service to read historical SMS messages from device
 /// Syncs existing SMS with the app database
@@ -40,6 +41,29 @@ class SmsHistoryService {
     _scanTimer = null;
     _categorizeTimer?.cancel();
     _categorizeTimer = null;
+  }
+
+  /// Check and send budget alerts after a transaction is saved
+  Future<void> _checkBudgetAlerts(String category) async {
+    try {
+      final notifService = NotificationService();
+      final budgets = await _dbService.getBudgets();
+
+      for (final budget in budgets) {
+        if (budget.category == category && budget.enabled) {
+          // Get updated spent amount
+          final txns = await _dbService.getTransactions();
+          final categorySpent = txns
+              .where((t) => t.category == category && t.type != 'credit')
+              .fold(0.0, (sum, t) => sum + t.amount);
+
+          final updated = budget.withSpent(categorySpent);
+          await notifService.checkBudgetAlert(updated);
+        }
+      }
+    } catch (e) {
+      print('[SmsHistory] Error checking budget alerts: $e');
+    }
   }
 
   /// Categorize all pending transactions with AI
@@ -292,6 +316,11 @@ class SmsHistoryService {
           // Save to database
           await _dbService.insertTransaction(transaction);
           savedCount++;
+
+          // Check budget alerts after saving (skip on first load for speed)
+          if (!isFirstLoad) {
+            await _checkBudgetAlerts(transaction.category);
+          }
 
           print(
               '[SmsHistory] ✓ Saved transaction #$savedCount: ${transaction.description}');
