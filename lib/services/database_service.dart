@@ -6,6 +6,8 @@ import '../models/transaction.dart' as app_transaction;
 import '../models/goal.dart';
 import '../models/budget.dart';
 import '../models/bill_reminder.dart';
+import '../models/investment.dart';
+import '../models/debt.dart';
 
 class DatabaseService {
   static final DatabaseService _instance = DatabaseService._internal();
@@ -21,6 +23,8 @@ class DatabaseService {
   static const String tableGoals = 'goals';
   static const String tableBudgets = 'budgets';
   static const String tableBillReminders = 'bill_reminders';
+  static const String tableInvestments = 'investments';
+  static const String tableDebts = 'debts';
 
   // Column names for transactions
   static const String columnId = 'id';
@@ -129,6 +133,37 @@ class DatabaseService {
         enabled INTEGER NOT NULL DEFAULT 1,
         reminder_days_before INTEGER NOT NULL DEFAULT 3,
         created_at TEXT NOT NULL
+)
+    ''');
+
+    // Investments table
+    await db.execute('''
+      CREATE TABLE $tableInvestments (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        type INTEGER NOT NULL,
+        purchase_price REAL NOT NULL,
+        quantity REAL NOT NULL,
+        purchase_date TEXT NOT NULL,
+        current_price REAL,
+        exchange TEXT,
+        updated_at TEXT NOT NULL
+      )
+    ''');
+
+    // Debts table
+    await db.execute('''
+      CREATE TABLE $tableDebts (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        principal REAL NOT NULL,
+        interest_rate REAL NOT NULL,
+        term_months INTEGER NOT NULL,
+        start_date TEXT NOT NULL,
+        monthly_payment REAL NOT NULL,
+        remaining_balance REAL NOT NULL,
+        lender TEXT,
+        is_paid_off INTEGER NOT NULL DEFAULT 0
       )
     ''');
   }
@@ -338,6 +373,56 @@ class DatabaseService {
     final db = await database;
     return await db
         .delete(tableBillReminders, where: 'id = ?', whereArgs: [id]);
+  }
+
+  // Investment CRUD
+  Future<int> insertInvestment(Investment inv) async {
+    final db = await database;
+    return await db.insert(tableInvestments, inv.toMap());
+  }
+
+  Future<int> updateInvestment(Investment inv) async {
+    final db = await database;
+    return await db.update(
+      tableInvestments,
+      inv.toMap(),
+      where: 'id = ?',
+      whereArgs: [inv.id],
+    );
+  }
+
+  Future<List<Investment>> getInvestments() async {
+    final db = await database;
+    final maps = await db.query(tableInvestments, orderBy: 'name ASC');
+    return maps.map((map) => Investment.fromMap(map)).toList();
+  }
+
+  Future<int> deleteInvestment(String id) async {
+    final db = await database;
+    return await db.delete(tableInvestments, where: 'id = ?', whereArgs: [id]);
+  }
+
+  // Debt CRUD
+  Future<int> insertDebt(Debt debt) async {
+    final db = await database;
+    return await db.insert(tableDebts, debt.toMap());
+  }
+
+  Future<int> updateDebt(Debt debt) async {
+    final db = await database;
+    return await db.update(tableDebts, debt.toMap(),
+        where: 'id = ?', whereArgs: [debt.id]);
+  }
+
+  Future<List<Debt>> getDebts() async {
+    final db = await database;
+    final maps = await db.query(tableDebts, orderBy: 'name ASC');
+    return maps.map((map) => Debt.fromMap(map)).toList();
+  }
+
+  Future<int> deleteDebt(String id) async {
+    final db = await database;
+    return await db.delete(tableDebts, where: 'id = ?', whereArgs: [id]);
   }
 
   /// Close database connection (optional cleanup)
