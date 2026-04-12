@@ -8,10 +8,14 @@ import '../services/database_service.dart';
 import '../models/account_summary.dart';
 import '../models/transaction.dart' as app_txn;
 import '../models/goal.dart';
+import '../models/budget.dart';
 import 'transactions_screen.dart';
 import 'goals_screen.dart';
 import 'ai_chat_screen.dart';
 import 'settings_screen.dart';
+import 'budget_settings_screen.dart';
+
+enum DateRangeType { thisMonth, last30Days, custom }
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -27,15 +31,19 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   List<app_txn.Transaction> _recentTransactions = [];
   List<SavingsGoal> _goals = [];
   List<AccountSummary> _accountSummaries = [];
+  List<Budget> _budgets = [];
   AccountSummary _activeAccount = AccountSummary(
     accountNumber: 'ALL',
     accountName: 'All Accounts',
   );
-  double _totalBalance = 0; // Total across all accounts
-  double _monthlyIncome = 0; // Current month income
-  double _spentAmount = 0; // Money spent this month
+  double _totalBalance = 0;
+  double _monthlyIncome = 0;
+  double _spentAmount = 0;
   bool _isLoading = true;
   int _currentNavIndex = 0;
+  DateRangeType _dateRangeType = DateRangeType.thisMonth;
+  DateTime _customStartDate = DateTime.now();
+  DateTime _customEndDate = DateTime.now();
 
   late AnimationController _fadeController;
   late Animation<double> _fadeAnimation;
@@ -213,6 +221,29 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         ));
       }
 
+      // Load budgets for current period
+      final (periodStart, periodEnd) = _getDateRange();
+      final budgets = await _dbService.getBudgets();
+
+      // Update spent amounts from transactions
+      final Map<String, double> categorySpent = {};
+      for (final txn in transactions) {
+        if (txn.type != 'credit' &&
+            txn.date.isAfter(periodStart) &&
+            txn.date.isBefore(periodEnd.add(const Duration(days: 1)))) {
+          final cat = txn.category;
+          categorySpent[cat] = (categorySpent[cat] ?? 0) + txn.amount;
+        }
+      }
+
+      final updatedBudgets = budgets
+          .where((b) =>
+              b.periodStart.isBefore(periodEnd) &&
+              b.periodEnd.isAfter(periodStart))
+          .map((b) {
+        return b.withSpent(categorySpent[b.category] ?? 0);
+      }).toList();
+
       // Restore total balance from persistent storage
       double persistentBalance = await _getConsistentTotalBalance();
       if (persistentBalance != 0) {
@@ -232,6 +263,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         _totalBalance = totalBalance;
         _monthlyIncome = monthlyIncome;
         _spentAmount = spentAmount;
+        _budgets = updatedBudgets;
         _isLoading = false;
       });
       _fadeController.forward();
@@ -248,6 +280,195 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       return '${isNegative ? '-' : ''}QAR${(abs / 1000).toStringAsFixed(1)}k';
     }
     return '${isNegative ? '-' : ''}QAR${abs.toStringAsFixed(2)}';
+  }
+
+  (DateTime, DateTime) _getDateRange() {
+    final now = DateTime.now();
+    switch (_dateRangeType) {
+      case DateRangeType.thisMonth:
+        final start = DateTime(now.year, now.month, 1);
+        final end = DateTime(now.year, now.month + 1, 0);
+        return (start, end);
+      case DateRangeType.last30Days:
+        final start = now.subtract(const Duration(days: 30));
+        return (start, now);
+      case DateRangeType.custom:
+        return (_customStartDate, _customEndDate);
+    }
+  }
+
+  String _getDateRangeLabel() {
+    switch (_dateRangeType) {
+      case DateRangeType.thisMonth:
+        return 'This Month';
+      case DateRangeType.last30Days:
+        return 'Last 30 Days';
+      case DateRangeType.custom:
+        return 'Custom';
+    }
+  }
+
+  void _showDateRangeSelector() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppTheme.surfaceCard,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) {
+          return Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Select Period',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: AppTheme.textPrimary,
+                    )),
+                const SizedBox(height: 20),
+                _buildDateRangeOption(
+                    'This Month', DateRangeType.thisMonth, setModalState),
+                const SizedBox(height: 12),
+                _buildDateRangeOption(
+                    'Last 30 Days', DateRangeType.last30Days, setModalState),
+                const SizedBox(height: 12),
+                _buildDateRangeOption(
+                    'Custom Range', DateRangeType.custom, setModalState),
+                if (_dateRangeType == DateRangeType.custom) ...[
+                  const SizedBox(height: 20),
+                  Row(
+                    children: [
+                      Expanded(
+                        child:
+                            _buildDatePicker('Start', _customStartDate, (date) {
+                          setModalState(() => _customStartDate = date);
+                        }),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: _buildDatePicker('End', _customEndDate, (date) {
+                          setModalState(() => _customEndDate = date);
+                        }),
+                      ),
+                    ],
+                  ),
+                ],
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      setState(() {});
+                      Navigator.pop(context);
+                      _loadData();
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.primary,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text('Apply'),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildDateRangeOption(
+      String label, DateRangeType type, StateSetter setModalState) {
+    final isSelected = _dateRangeType == type;
+    return GestureDetector(
+      onTap: () => setModalState(() => _dateRangeType = type),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color:
+              isSelected ? AppTheme.primary.withOpacity(0.1) : AppTheme.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color:
+                isSelected ? AppTheme.primary : Colors.white.withOpacity(0.06),
+            width: isSelected ? 2 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              isSelected ? Icons.radio_button_checked : Icons.radio_button_off,
+              color: isSelected ? AppTheme.primary : AppTheme.textTertiary,
+            ),
+            const SizedBox(width: 12),
+            Text(label,
+                style: TextStyle(
+                  color: isSelected ? AppTheme.primary : AppTheme.textPrimary,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                )),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDatePicker(
+      String label, DateTime date, Function(DateTime) onChanged) {
+    return GestureDetector(
+      onTap: () async {
+        final picked = await showDatePicker(
+          context: context,
+          initialDate: date,
+          firstDate: DateTime(2020),
+          lastDate: DateTime.now(),
+          builder: (context, child) {
+            return Theme(
+              data: ThemeData.dark().copyWith(
+                colorScheme: const ColorScheme.dark(
+                  primary: AppTheme.primary,
+                  surface: AppTheme.surfaceCard,
+                ),
+              ),
+              child: child!,
+            );
+          },
+        );
+        if (picked != null) onChanged(picked);
+      },
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.white.withOpacity(0.06)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label,
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: AppTheme.textTertiary,
+                )),
+            const SizedBox(height: 4),
+            Text(DateFormat('MMM d, yyyy').format(date),
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.textPrimary,
+                )),
+          ],
+        ),
+      ),
+    );
   }
 
   void _navigateTo(Widget screen) {
@@ -277,6 +498,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                         _buildBalanceCard(),
                         const SizedBox(height: 20),
                         _buildIncomeExpenseRow(),
+                        _buildBudgetProgressSection(),
                         const SizedBox(height: 28),
                         _buildQuickActions(),
                         const SizedBox(height: 28),
@@ -430,43 +652,68 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             ],
           ),
           const SizedBox(height: 16),
-          // Account selector row
+          // Account and date range selectors
           Row(
             children: [
               Expanded(
-                child: Text(
-                  'Account: ${_activeAccount.accountName}',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
+                child: GestureDetector(
+                  onTap: _showAccountDialog,
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: Colors.white.withOpacity(0.2)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.account_balance_wallet,
+                            color: Colors.white70, size: 14),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            _activeAccount.accountNumber == 'ALL'
+                                ? 'All Accounts'
+                                : '****${_activeAccount.accountNumber}',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const Icon(Icons.arrow_drop_down,
+                            color: Colors.white70, size: 16),
+                      ],
+                    ),
                   ),
                 ),
               ),
+              const SizedBox(width: 8),
               GestureDetector(
-                onTap: _showAccountDialog,
+                onTap: _showDateRangeSelector,
                 child: Container(
                   padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
                     color: Colors.white.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(14),
                     border: Border.all(color: Colors.white.withOpacity(0.2)),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        _activeAccount.accountNumber == 'ALL'
-                            ? 'All Accounts'
-                            : '****${_activeAccount.accountNumber}',
+                        _getDateRangeLabel(),
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 12,
                         ),
                       ),
                       const Icon(Icons.arrow_drop_down,
-                          color: Colors.white, size: 18),
+                          color: Colors.white70, size: 16),
                     ],
                   ),
                 ),
@@ -677,6 +924,132 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
+  // ─── Budget Progress Section ────────────────────────────────
+  Widget _buildBudgetProgressSection() {
+    final activeBudgets =
+        _budgets.where((b) => b.enabled && b.limit > 0).toList();
+    if (activeBudgets.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 28),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('Budget Progress', style: AppTheme.heading3),
+            Text(
+              '${activeBudgets.length} categories',
+              style: AppTheme.caption,
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        ...activeBudgets.take(4).map((budget) => _buildBudgetCard(budget)),
+      ],
+    );
+  }
+
+  Widget _buildBudgetCard(Budget budget) {
+    final color = budget.isExceeded
+        ? AppTheme.accentRed
+        : budget.isNearLimit
+            ? AppTheme.accentOrange
+            : budget.isWarning
+                ? AppTheme.accent
+                : AppTheme.accentGreen;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.surfaceCard,
+        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+        border: Border.all(
+          color: budget.isNearLimit || budget.isExceeded
+              ? color.withOpacity(0.3)
+              : Colors.white.withOpacity(0.06),
+        ),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  AppTheme.getCategoryIcon(budget.category),
+                  color: color,
+                  size: 18,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      budget.category,
+                      style: const TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'QAR${budget.spent.toStringAsFixed(0)} / QAR${budget.limit.toStringAsFixed(0)}',
+                      style: AppTheme.caption,
+                    ),
+                  ],
+                ),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    '${budget.utilizationPercent.toInt()}%',
+                    style: TextStyle(
+                      color: color,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  if (budget.isNearLimit || budget.isExceeded)
+                    Text(
+                      budget.statusText,
+                      style: TextStyle(
+                        color: color,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: (budget.utilizationPercent / 100).clamp(0.0, 1.0),
+              backgroundColor: Colors.white.withOpacity(0.06),
+              valueColor: AlwaysStoppedAnimation<Color>(color),
+              minHeight: 5,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildStatChip({
     required IconData icon,
     required String label,
@@ -755,11 +1128,22 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     ],
                   ),
                   const SizedBox(height: 12),
-                  _buildActionItem(
-                    Icons.settings_rounded,
-                    'Settings',
-                    AppTheme.textTertiary,
-                    () => _navigateTo(const SettingsScreen()),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      _buildActionItem(
+                        Icons.pie_chart_rounded,
+                        'Budgets',
+                        AppTheme.accent,
+                        () => _navigateTo(const BudgetSettingsScreen()),
+                      ),
+                      _buildActionItem(
+                        Icons.settings_rounded,
+                        'Settings',
+                        AppTheme.textTertiary,
+                        () => _navigateTo(const SettingsScreen()),
+                      ),
+                    ],
                   ),
                 ],
               )
@@ -786,10 +1170,16 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     () => _navigateTo(const AiChatScreen()),
                   ),
                   _buildActionItem(
-                    Icons.analytics_rounded,
-                    'Analytics',
-                    AppTheme.accentOrange,
-                    () => _navigateTo(const AnalyticsScreen()),
+                    Icons.pie_chart_rounded,
+                    'Budgets',
+                    AppTheme.accent,
+                    () => _navigateTo(const BudgetSettingsScreen()),
+                  ),
+                  _buildActionItem(
+                    Icons.settings_rounded,
+                    'Settings',
+                    AppTheme.textTertiary,
+                    () => _navigateTo(const SettingsScreen()),
                   ),
                 ],
               ),
