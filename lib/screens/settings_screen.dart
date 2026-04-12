@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:thangu/services/export_service.dart';
 import 'package:thangu/services/proactive_ai_service.dart';
 import 'package:thangu/services/sms_history_service.dart';
@@ -181,19 +182,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _exportData() async {
     try {
-      final json = await _exportService.exportToJson();
+      final csv = await _exportService.exportToCsv();
+      final now = DateTime.now();
       final fileName =
-          'thangu_backup_${DateTime.now().millisecondsSinceEpoch}.json';
-      final filePath = await _exportService.saveExportFile(json, fileName);
+          'thangu_export_${now.year}${now.month.toString().padLeft(2, '0')}${now.day}.csv';
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Data exported to: $filePath'),
-            backgroundColor: AppTheme.primaryDark,
-          ),
-        );
-      }
+      await Share.share(csv, subject: 'Thangu Finance Export');
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

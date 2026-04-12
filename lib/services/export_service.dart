@@ -74,6 +74,16 @@ class ExportService {
     }
   }
 
+  // Get export data for sharing
+  Future<Map<String, String>> getExportData() async {
+    final csv = await exportToCsv();
+    final json = await exportToJson();
+    return {
+      'csv': csv,
+      'json': json,
+    };
+  }
+
   // Import data from JSON
   Future<void> importFromJson(String jsonContent) async {
     try {

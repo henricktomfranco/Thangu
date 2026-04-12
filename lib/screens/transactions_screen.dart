@@ -27,6 +27,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
   bool _isProcessingSms = false;
   String _searchQuery = '';
   String _filterType = 'all'; // 'all', 'credit', 'debit'
+  String? _filterCategory; // For category filter
 
   @override
   void initState() {
@@ -56,10 +57,12 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
   void _applyFilters() {
     _filteredTransactions = _transactions.where((txn) {
       final matchesType = _filterType == 'all' || txn.type == _filterType;
+      final matchesCategory =
+          _filterCategory == null || txn.category == _filterCategory;
       final matchesSearch = _searchQuery.isEmpty ||
           txn.description.toLowerCase().contains(_searchQuery.toLowerCase()) ||
           txn.category.toLowerCase().contains(_searchQuery.toLowerCase());
-      return matchesType && matchesSearch;
+      return matchesType && matchesCategory && matchesSearch;
     }).toList();
   }
 
@@ -217,6 +220,8 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                 _buildFilterChip('Income', 'credit'),
                 const SizedBox(width: 8),
                 _buildFilterChip('Expenses', 'debit'),
+                const Spacer(),
+                _buildCategoryFilterButton(),
               ],
             ),
           ),
@@ -342,6 +347,81 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
             fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildCategoryFilterButton() {
+    final hasFilter = _filterCategory != null;
+    return GestureDetector(
+      onTap: _showCategoryFilter,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: hasFilter
+              ? AppTheme.primary.withOpacity(0.2)
+              : AppTheme.surfaceCard,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+              color: hasFilter
+                  ? AppTheme.primary
+                  : Colors.white.withOpacity(0.06)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.category_rounded,
+                size: 16,
+                color: hasFilter ? AppTheme.primary : AppTheme.textSecondary),
+            const SizedBox(width: 4),
+            Text(hasFilter ? _filterCategory! : 'Category',
+                style: TextStyle(
+                  color: hasFilter ? AppTheme.primary : AppTheme.textSecondary,
+                  fontSize: 12,
+                )),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showCategoryFilter() {
+    final categories = _transactions.map((t) => t.category).toSet().toList()
+      ..sort();
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppTheme.surfaceCard,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Padding(
+            padding: EdgeInsets.all(16),
+            child: Text('Filter by Category',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          ),
+          ListTile(
+            title: const Text('All Categories'),
+            onTap: () {
+              setState(() => _filterCategory = null);
+              _applyFilters();
+              Navigator.pop(context);
+            },
+          ),
+          ...categories.map((cat) => ListTile(
+                title: Text(cat),
+                trailing: _filterCategory == cat
+                    ? const Icon(Icons.check, color: AppTheme.primary)
+                    : null,
+                onTap: () {
+                  setState(() => _filterCategory = cat);
+                  _applyFilters();
+                  Navigator.pop(context);
+                },
+              )),
+          const SizedBox(height: 16),
+        ],
       ),
     );
   }
