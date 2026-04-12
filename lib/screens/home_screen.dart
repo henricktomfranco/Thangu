@@ -14,6 +14,7 @@ import 'goals_screen.dart';
 import 'ai_chat_screen.dart';
 import 'settings_screen.dart';
 import 'budget_settings_screen.dart';
+import 'bill_reminders_screen.dart';
 
 enum DateRangeType { thisMonth, last30Days, custom }
 
@@ -1132,6 +1133,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       _buildActionItem(
+                        Icons.receipt_long_rounded,
+                        'Bills',
+                        AppTheme.accentOrange,
+                        () => _navigateTo(const BillRemindersScreen()),
+                      ),
+                      _buildActionItem(
                         Icons.pie_chart_rounded,
                         'Budgets',
                         AppTheme.accent,
@@ -1164,10 +1171,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     () => _navigateTo(const GoalsScreen()),
                   ),
                   _buildActionItem(
-                    Icons.auto_awesome_rounded,
-                    'AI Chat',
-                    AppTheme.primaryLight,
-                    () => _navigateTo(const AiChatScreen()),
+                    Icons.receipt_long_rounded,
+                    'Bills',
+                    AppTheme.accentOrange,
+                    () => _navigateTo(const BillRemindersScreen()),
                   ),
                   _buildActionItem(
                     Icons.pie_chart_rounded,

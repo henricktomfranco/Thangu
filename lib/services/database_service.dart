@@ -5,6 +5,7 @@ import 'package:sqflite/sqflite.dart';
 import '../models/transaction.dart' as app_transaction;
 import '../models/goal.dart';
 import '../models/budget.dart';
+import '../models/bill_reminder.dart';
 
 class DatabaseService {
   static final DatabaseService _instance = DatabaseService._internal();
@@ -19,6 +20,7 @@ class DatabaseService {
   static const String tableTransactions = 'transactions';
   static const String tableGoals = 'goals';
   static const String tableBudgets = 'budgets';
+  static const String tableBillReminders = 'bill_reminders';
 
   // Column names for transactions
   static const String columnId = 'id';
@@ -112,6 +114,21 @@ class DatabaseService {
         $columnBudgetPeriodEnd TEXT NOT NULL,
         $columnBudgetEnabled INTEGER NOT NULL DEFAULT 1,
         $columnBudgetCreatedAt TEXT NOT NULL
+      )
+    ''');
+
+    // Bill reminders table
+    await db.execute('''
+      CREATE TABLE $tableBillReminders (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        amount REAL NOT NULL,
+        due_date TEXT NOT NULL,
+        recurrence INTEGER NOT NULL DEFAULT 1,
+        category TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        reminder_days_before INTEGER NOT NULL DEFAULT 3,
+        created_at TEXT NOT NULL
       )
     ''');
   }
@@ -282,6 +299,45 @@ class DatabaseService {
       return await updateBudget(updated);
     }
     return 0;
+  }
+
+  // Bill Reminders CRUD
+  Future<int> insertBillReminder(BillReminder bill) async {
+    final db = await database;
+    return await db.insert(tableBillReminders, bill.toMap());
+  }
+
+  Future<int> updateBillReminder(BillReminder bill) async {
+    final db = await database;
+    return await db.update(
+      tableBillReminders,
+      bill.toMap(),
+      where: 'id = ?',
+      whereArgs: [bill.id],
+    );
+  }
+
+  Future<List<BillReminder>> getBillReminders() async {
+    final db = await database;
+    final maps = await db.query(tableBillReminders, orderBy: 'due_date ASC');
+    return maps.map((map) => BillReminder.fromMap(map)).toList();
+  }
+
+  Future<BillReminder?> getBillReminderById(String id) async {
+    final db = await database;
+    final maps = await db.query(
+      tableBillReminders,
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    if (maps.isEmpty) return null;
+    return BillReminder.fromMap(maps.first);
+  }
+
+  Future<int> deleteBillReminder(String id) async {
+    final db = await database;
+    return await db
+        .delete(tableBillReminders, where: 'id = ?', whereArgs: [id]);
   }
 
   /// Close database connection (optional cleanup)
