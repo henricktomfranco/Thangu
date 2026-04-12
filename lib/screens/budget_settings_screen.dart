@@ -43,28 +43,51 @@ class _BudgetSettingsScreenState extends State<BudgetSettingsScreen> {
   }
 
   Future<void> _createBudget() async {
-    if (_selectedCategory == null || _limitController.text.isEmpty) return;
+    if (_selectedCategory == null || _limitController.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Please select a category and enter amount')),
+      );
+      return;
+    }
 
     final limit = double.tryParse(_limitController.text);
-    if (limit == null || limit <= 0) return;
+    if (limit == null || limit <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a valid amount')),
+      );
+      return;
+    }
 
-    final now = DateTime.now();
-    final periodStart = DateTime(now.year, now.month, 1);
-    final periodEnd = DateTime(now.year, now.month + 1, 0);
+    try {
+      final now = DateTime.now();
+      final periodStart = DateTime(now.year, now.month, 1);
+      final periodEnd = DateTime(now.year, now.month + 1, 0);
 
-    final budget = Budget(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
-      category: _selectedCategory!,
-      limit: limit,
-      periodStart: periodStart,
-      periodEnd: periodEnd,
-      createdAt: now,
-    );
+      final budget = Budget(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        category: _selectedCategory!,
+        limit: limit,
+        periodStart: periodStart,
+        periodEnd: periodEnd,
+        createdAt: now,
+      );
 
-    await _dbService.insertBudget(budget);
-    _limitController.clear();
-    setState(() => _selectedCategory = null);
-    _loadBudgets();
+      await _dbService.insertBudget(budget);
+      _limitController.clear();
+      setState(() => _selectedCategory = null);
+      _loadBudgets();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Budget added for ${_selectedCategory}')),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error creating budget: $e')),
+      );
+    }
   }
 
   Future<void> _updateBudgetLimit(Budget budget, double newLimit) async {
@@ -103,9 +126,20 @@ class _BudgetSettingsScreenState extends State<BudgetSettingsScreen> {
   }
 
   void _showAddBudgetDialog() {
-    final availableCategories = BudgetUtils.budgetableCategories
-        .where((cat) => !_budgets.any((b) => b.category == cat))
-        .toList();
+    // Get categories that don't have budgets yet, or all if none exist
+    List<String> availableCategories;
+    if (_budgets.isEmpty) {
+      availableCategories = List.from(BudgetUtils.budgetableCategories);
+    } else {
+      availableCategories = BudgetUtils.budgetableCategories
+          .where((cat) => !_budgets.any((b) => b.category == cat))
+          .toList();
+    }
+
+    // If all categories used, allow adding more or show message
+    if (availableCategories.isEmpty) {
+      availableCategories = List.from(BudgetUtils.budgetableCategories);
+    }
 
     showModalBottomSheet(
       context: context,
@@ -137,7 +171,7 @@ class _BudgetSettingsScreenState extends State<BudgetSettingsScreen> {
                     )),
                 const SizedBox(height: 8),
                 DropdownButtonFormField<String>(
-                  initialValue: _selectedCategory,
+                  value: _selectedCategory,
                   decoration: InputDecoration(
                     filled: true,
                     fillColor: AppTheme.surface,
