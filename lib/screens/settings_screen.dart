@@ -28,6 +28,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _biometricAuth = false;
   double _transactionAlertThreshold = 100.0;
   int _savingAggression = 1;
+  String _themeMode = 'dark';
 
   // Dynamic Models
   List<String> _availableModels = [];
@@ -142,6 +143,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _aiApiKey = savedApiKey;
       _isOllama = savedIsOllama;
       _notificationsEnabled = prefs.getBool('notifications_enabled') ?? true;
+      _themeMode = prefs.getString('theme_mode') ?? 'dark';
       _biometricAuth = prefs.getBool('biometric_auth') ?? false;
       _transactionAlertThreshold =
           prefs.getDouble('transaction_alert_threshold') ?? 100.0;
