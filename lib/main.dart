@@ -47,6 +47,7 @@ void main() async {
       final count = await smsHistory.loadHistoricalSms(
         lastDays: 90,
         useAI: false,
+        isFirstLoad: true,
       );
       print('[Startup] ✓ Loaded $count historical transactions');
 

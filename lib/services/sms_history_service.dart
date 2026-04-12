@@ -111,37 +111,74 @@ class SmsHistoryService {
 
   /// Check if an SMS is a potential financial transaction
   Future<bool> _isFinancialSms(String body) async {
-    // Expanded patterns for financial transaction detection
-    final patterns = [
-      // Arabic/English patterns for common transaction types
-      'qatar riyal', 'ريال قطري', 'qatar', 'qa', 'amount', 'مبلغ', 'balanc',
-      'debited', 'credited', 'paid', 'withdraw', 'deposit', 'transfer', 'sent',
-      'received',
-      'صرف', 'إيداع', 'إستلام', 'تم صرف', 'تلقيتها', 'التحويل', 'حساب',
-      'رقم الحساب',
-      'card', 'بطاقة', 'transaction', 'عملية', 'otp', 'كلمة سر', 'رمز التأكيد',
-      'top up', 'recharge', 'شحن', 'فودافون', ' الرقم المرجعي', 'reference',
-      // Bank-specific patterns
-      'qnb', 'doha bank', 'commercial bank', 'ahlibank', 'rayyan bank',
-      'masraf', 'بنك', 'دبي الإسلامي', 'الإسلامي', 'المركزي', 'البنك',
-    ];
-
-    // Check if any pattern exists in the message
     final lowerBody = body.toLowerCase();
 
-    // If any banking pattern is found, consider it financial
-    for (final pattern in patterns) {
-      if (lowerBody.contains(pattern)) return true;
+    // Skip OTP/authentication SMS - these are NOT transactions
+    if (lowerBody.contains('otp') ||
+        lowerBody.contains('authentication') ||
+        lowerBody.contains('login') ||
+        lowerBody.contains('password') ||
+        lowerBody.contains('رمز') ||
+        lowerBody.contains('كلمة سر') ||
+        lowerBody.contains('تأكيد') ||
+        lowerBody.contains('verification') ||
+        lowerBody.contains('كود')) {
+      return false;
     }
 
-    // Specific amount detection
-    // Detect patterns like "1,000.00 QAR", "QR 50.00", "50 QR", "ريال ١٠٠" etc.
-    final amountPattern = RegExp(
-        r'(\d{1,3},?\d{0,3}\.\d{2}|\d{1,5}\.\d{2}|ريال\s?\d+|\d+\s?(ريال|qr|qar))',
+    // Broad amount detection - if it has any amount, likely a transaction
+    // Patterns: "QR 50", "50 QAR", "QAR 100.00", "100.00 QR", "ريال ٥٠"
+    final amountPattern = RegExp(r'(qr\s?\d+|qar\s?\d+|\d+\s?qr|rial|ريال)',
         caseSensitive: false);
 
     if (amountPattern.hasMatch(body)) {
       return true;
+    }
+
+    // Common transaction keywords
+    final transactionKeywords = [
+      'spent',
+      'purchase',
+      'payment',
+      'paid',
+      'debited',
+      'credited',
+      'withdraw',
+      'deposit',
+      'transfer',
+      'sent',
+      'received',
+      'card',
+      'atm',
+      'pos',
+      ' purchase ',
+      ' payment ',
+      'صرف',
+      'دفع',
+      'شراء',
+      'إيداع',
+      'سحب',
+      'تحويل',
+    ];
+
+    for (final keyword in transactionKeywords) {
+      if (lowerBody.contains(keyword)) return true;
+    }
+
+    // Bank/card sender patterns
+    final senderPatterns = [
+      'qnb',
+      'doha bank',
+      'commercial',
+      'ahlibank',
+      'rayyan',
+      'masraf',
+      'dib',
+      'cbq',
+      'bank'
+    ];
+    for (final pattern in senderPatterns) {
+      if (lowerBody.contains(pattern)) return true;
     }
 
     // If none of the patterns match, it's likely not a financial SMS
@@ -151,17 +188,20 @@ class SmsHistoryService {
   /// Load historical SMS messages and save to database
   /// [lastDays] can be int (number of days) or Duration
   /// [useAI] - whether to use AI for categorization (skip on first load for speed)
+  /// [isFirstLoad] - if true, skip duplicate check for faster initial load
   Future<int> loadHistoricalSms({
     dynamic lastDays,
     bool overwrite = false,
     bool useAI = true,
+    bool isFirstLoad = false,
   }) async {
     try {
       // Initialize AI service only if using AI
       if (useAI) {
         await _aiService.initialize();
       }
-      print('[SmsHistory] Starting to load historical SMS...');
+      print(
+          '[SmsHistory] Starting to load historical SMS (first load: $isFirstLoad)...');
 
       // Convert to days if Duration
       int limitDays = 90; // default
@@ -224,19 +264,21 @@ class SmsHistoryService {
             continue;
           }
 
-          // Check if already exists in database
-          final existingTxn = await _dbService.getTransactions();
-          final isDuplicate = existingTxn.any(
-            (t) =>
-                t.description
-                    .contains(body.substring(0, min(body.length, 30))) &&
-                t.sender == sender,
-          );
+          // Check if already exists in database (only on subsequent scans, not first load)
+          if (!isFirstLoad) {
+            final existingTxn = await _dbService.getTransactions();
+            final isDuplicate = existingTxn.any(
+              (t) =>
+                  t.description
+                      .contains(body.substring(0, min(body.length, 30))) &&
+                  t.sender == sender,
+            );
 
-          if (isDuplicate && !overwrite) {
-            print(
-                '[SmsHistory] Duplicate SMS skipped: ${body.substring(0, 30)}...');
-            continue;
+            if (isDuplicate && !overwrite) {
+              print(
+                  '[SmsHistory] Duplicate SMS skipped: ${body.substring(0, 30)}...');
+              continue;
+            }
           }
 
           // Parse SMS content
