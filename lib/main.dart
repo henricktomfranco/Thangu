@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'app_theme.dart';
 import 'screens/home_screen.dart';
 import 'services/sms_history_service.dart';
@@ -17,6 +18,10 @@ void main() async {
     ),
   );
 
+  // Check if first run - only full scan on first install
+  final prefs = await SharedPreferences.getInstance();
+  final isFirstRun = prefs.getBool('first_sms_scan_complete') ?? true;
+
   // Initialize AI services
   print('[Startup] Initializing AI services...');
   try {
@@ -31,21 +36,37 @@ void main() async {
     print('[Startup] ✗ Could not initialize AI: $e');
   }
 
-  // Load historical SMS messages on app startup (skip AI for speed)
-  print('[Startup] Loading historical SMS messages...');
+  // Load historical SMS messages
+  print('[Startup] Loading SMS messages...');
   try {
     final smsHistory = SmsHistoryService();
-    final count = await smsHistory.loadHistoricalSms(
-      lastDays: 90, // Load messages from last 90 days
-      useAI: false, // Skip AI on first load for speed
-    );
-    print('[Startup] ✓ Loaded $count historical transactions');
+
+    if (isFirstRun) {
+      // First run: load full 90 days of history
+      print('[Startup] First run: performing full scan...');
+      final count = await smsHistory.loadHistoricalSms(
+        lastDays: 90,
+        useAI: false,
+      );
+      print('[Startup] ✓ Loaded $count historical transactions');
+
+      // Mark first scan complete
+      await prefs.setBool('first_sms_scan_complete', false);
+    } else {
+      // Subsequent runs: load only last 3 days (new SMS since last scan)
+      print('[Startup] Subsequent run: scanning only new messages...');
+      final count = await smsHistory.loadHistoricalSms(
+        lastDays: 3,
+        useAI: true,
+      );
+      print('[Startup] ✓ Loaded $count new transactions');
+    }
 
     // Start background scanning for new SMS every 15 min
     smsHistory.startBackgroundScanning();
     print('[Startup] ✓ Background SMS scanning started (15 min interval)');
   } catch (e) {
-    print('[Startup] ✗ Could not load historical SMS: $e');
+    print('[Startup] ✗ Could not load SMS: $e');
   }
 
   print('[Startup] App initialization complete, launching UI...');
