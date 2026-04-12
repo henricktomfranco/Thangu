@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart';
 import 'package:thangu/services/export_service.dart';
 import 'package:thangu/services/proactive_ai_service.dart';
 import 'package:thangu/services/sms_history_service.dart';
@@ -264,16 +266,51 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       );
 
-      // Simulate update check - in real app, would check GitHub releases
-      await Future.delayed(const Duration(seconds: 2));
+      // Check GitHub API for latest release
+      final response = await http.get(
+        Uri.parse(
+            'https://api.github.com/repos/henricktomfranco/Thangu/releases/latest'),
+      );
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('You are on the latest version!'),
-            backgroundColor: AppTheme.accentGreen,
-          ),
-        );
+      if (response.statusCode == 200) {
+        // Parse tag_name from response
+        final tagMatch =
+            RegExp(r'"tag_name":\s*"v([^"]+)"').firstMatch(response.body);
+        if (tagMatch != null) {
+          final latestVersion = 'v${tagMatch.group(1)}';
+          final currentVersion = 'v1.0.4';
+
+          if (latestVersion.compareTo(currentVersion) > 0) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Update available: $latestVersion'),
+                  backgroundColor: AppTheme.accentOrange,
+                  action: SnackBarAction(
+                    label: 'View',
+                    textColor: Colors.white,
+                    onPressed: () async {
+                      final url = Uri.parse(
+                          'https://github.com/henricktomfranco/Thangu/releases');
+                      if (await canLaunchUrl(url)) {
+                        await launchUrl(url);
+                      }
+                    },
+                  ),
+                ),
+              );
+            }
+          } else {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('You are on the latest version!'),
+                  backgroundColor: AppTheme.accentGreen,
+                ),
+              );
+            }
+          }
+        }
       }
     } catch (e) {
       if (mounted) {
