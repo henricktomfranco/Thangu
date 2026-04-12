@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:thangu/screens/analytics_screen.dart';
+import 'package:thangu/services/account_service.dart';
 import '../app_theme.dart';
 import '../services/database_service.dart';
+import '../models/account_summary.dart';
 import '../models/transaction.dart' as app_txn;
 import '../models/goal.dart';
 import 'transactions_screen.dart';
@@ -20,10 +22,16 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   final DatabaseService _dbService = DatabaseService();
+  final AccountService _accountService = AccountService();
 
   List<app_txn.Transaction> _recentTransactions = [];
   List<SavingsGoal> _goals = [];
-  double _totalBalance = 0; // All-time cumulative balance
+  List<AccountSummary> _accountSummaries = [];
+  AccountSummary _activeAccount = AccountSummary(
+    accountNumber: 'ALL',
+    accountName: 'All Accounts',
+  );
+  double _totalBalance = 0; // Total across all accounts
   double _monthlyIncome = 0; // Current month income
   double _spentAmount = 0; // Money spent this month
   bool _isLoading = true;
@@ -44,6 +52,52 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       curve: Curves.easeOut,
     );
     _loadData();
+  }
+
+  // Show account selection dialog
+  void _showAccountDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          backgroundColor: AppTheme.surfaceCard,
+          title: const Text('Select Account'),
+          content: SizedBox(
+            width: double.minPositive,
+            height: MediaQuery.of(context).size.height * 0.5,
+            child: ListView.builder(
+              itemCount: _accountSummaries.length,
+              itemBuilder: (context, index) {
+                final account = _accountSummaries[index];
+                final isSelected =
+                    account.accountNumber == _activeAccount.accountNumber;
+                return ListTile(
+                  title: Text(account.accountName),
+                  subtitle: Text(account.accountNumber == 'ALL'
+                      ? 'All accounts'
+                      : '**${account.accountNumber}'),
+                  trailing:
+                      Text('QAR${account.currentBalance.toStringAsFixed(2)}'),
+                  selected: isSelected,
+                  onTap: () {
+                    setState(() {
+                      _activeAccount = account;
+                    });
+                    Navigator.pop(context);
+                  },
+                );
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   @override
@@ -83,46 +137,101 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
     try {
-      // Get ALL transactions (no limit) to calculate accurate total balance
-      // For better performance, calculate from DateTime.now().subtract(Duration(days: 365 * 10))
-      // This covers 10 years of transactions
+      // Get ALL transactions (filter by account if selected)
       final transactions = await _dbService.getTransactions(
           startDate: DateTime.now().subtract(Duration(days: 365 * 10)));
       final goals = await _dbService.getGoals();
 
-      // Calculate current month stats first
+      // Calculate current month stats and account summaries
       final now = DateTime.now();
       final startOfMonth = DateTime(now.year, now.month, 1);
-      double monthlyIncome = 0, monthlyExpenses = 0;
 
+      double totalBalance = 0;
+      double monthlyIncome = 0;
+      double spentAmount = 0;
+
+      // Track account summaries
+      final Map<String, AccountSummary> accountMap = {};
+
+      // Process transactions
       for (final txn in transactions) {
-        // Monthly stats
-        if (txn.date.isAfter(startOfMonth)) {
+        final isCurrentMonth = txn.date.isAfter(startOfMonth);
+
+        // All-time total balance
+        if (txn.type == 'credit') {
+          totalBalance += txn.amount;
+        } else {
+          totalBalance -= txn.amount;
+        }
+
+        // Monthly stats for current month
+        if (isCurrentMonth) {
           if (txn.type == 'credit') {
             monthlyIncome += txn.amount;
           } else {
             // Track money spent
-            _spentAmount += txn.amount;
+            spentAmount += txn.amount;
           }
         }
+
+        // Create/update account summary
+        final accountNumber = txn.accountNumber ?? 'UNKNOWN';
+        accountMap.putIfAbsent(
+            accountNumber,
+            () => AccountSummary(
+                  accountNumber: accountNumber,
+                  accountName: txn.accountName ?? 'Account $accountNumber',
+                ));
+
+        final account = accountMap[accountNumber]!;
+        accountMap[accountNumber] = AccountSummary(
+          accountNumber: account.accountNumber,
+          accountName: account.accountName,
+          monthlyIncome: account.monthlyIncome +
+              (isCurrentMonth && txn.type == 'credit' ? txn.amount : 0),
+          monthlySpent: account.monthlySpent +
+              (isCurrentMonth && txn.type != 'credit' ? txn.amount : 0),
+          transactionCount: account.transactionCount + 1,
+          currentBalance: account.currentBalance +
+              (txn.type == 'credit' ? txn.amount : -txn.amount),
+        );
       }
 
-      // Calculate all-time total balance (stable value)
-      // Read from app state/config to get consistent balance
-      // This prevents recalculating balance from transactions every time
-      double totalBalance = await _getConsistentTotalBalance();
-      // If total balance not set yet, calculate from transactions
-      if (totalBalance == 0 && transactions.isNotEmpty) {
-        totalBalance = _calculateTotalBalanceFromTransactions(transactions);
+      // Convert to list and add consolidated ALL account
+      final accountSummaries = accountMap.values.toList();
+      if (accountSummaries.isNotEmpty) {
+        accountSummaries.insert(
+            0, AccountSummary.consolidate(accountSummaries));
+      } else {
+        // Fallback: all accounts view
+        accountSummaries.add(AccountSummary(
+          accountNumber: 'ALL',
+          accountName: 'All Accounts',
+          monthlyIncome: monthlyIncome,
+          monthlySpent: spentAmount,
+          currentBalance: totalBalance,
+        ));
+      }
+
+      // Restore total balance from persistent storage
+      double persistentBalance = await _getConsistentTotalBalance();
+      if (persistentBalance != 0) {
+        totalBalance = persistentBalance;
+      } else {
         await _saveTotalBalance(totalBalance);
       }
 
       setState(() {
         _recentTransactions = transactions.take(5).toList();
         _goals = goals;
+        _accountSummaries = accountSummaries;
+        _activeAccount = accountSummaries.firstWhere(
+          (acc) => acc.accountNumber == 'ALL',
+          orElse: () => accountSummaries.first,
+        );
         _totalBalance = totalBalance;
         _monthlyIncome = monthlyIncome;
-        _spentAmount = _spentAmount;
+        _spentAmount = spentAmount;
         _isLoading = false;
       });
       _fadeController.forward();
@@ -321,26 +430,60 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             ],
           ),
           const SizedBox(height: 16),
-          // Current Month Overview
-          MediaQuery.of(context).size.width < 360
-              ? Text(
-                  'QAR${_monthlyIncome.toStringAsFixed(2)}',
-                  style: TextStyle(
+          // Account selector row
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Account: ${_activeAccount.accountName}',
+                  style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 32,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: -0.5,
-                  ),
-                )
-              : Text(
-                  'QAR${_monthlyIncome.toStringAsFixed(2)}',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 38,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: -1,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
+              ),
+              GestureDetector(
+                onTap: _showAccountDialog,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.white.withOpacity(0.2)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        _activeAccount.accountNumber == 'ALL'
+                            ? 'All Accounts'
+                            : '****${_activeAccount.accountNumber}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                        ),
+                      ),
+                      const Icon(Icons.arrow_drop_down,
+                          color: Colors.white, size: 18),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // Current Bank Balance (Total Net Worth)
+          Text(
+            'QAR${_activeAccount.currentBalance.toStringAsFixed(2)}',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: MediaQuery.of(context).size.width < 360 ? 32 : 38,
+              fontWeight: FontWeight.bold,
+              letterSpacing: -0.5,
+            ),
+          ),
           const SizedBox(height: 6),
           Text('Monthly Income',
               style: TextStyle(
