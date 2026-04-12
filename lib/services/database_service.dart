@@ -29,6 +29,10 @@ class DatabaseService {
   static const String columnSender = 'sender';
   static const String columnIsCategorizedByAI = 'is_categorized_by_ai';
   static const String columnAiConfidence = 'ai_confidence';
+  // Account fields
+  static const String columnAccountNumber = 'account_number';
+  static const String columnAccountName = 'account_name';
+  static const String columnAccountType = 'account_type';
 
   // Column names for goals
   static const String columnGoalId = 'id';
@@ -66,7 +70,10 @@ class DatabaseService {
         $columnDate TEXT NOT NULL,
         $columnSender TEXT,
         $columnIsCategorizedByAI INTEGER NOT NULL,
-        $columnAiConfidence REAL NOT NULL
+        $columnAiConfidence REAL NOT NULL,
+        $columnAccountNumber TEXT,
+        $columnAccountName TEXT,
+        $columnAccountType TEXT
       )
     ''');
 

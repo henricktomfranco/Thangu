@@ -5,6 +5,7 @@ import 'package:thangu/models/transaction.dart';
 import 'package:thangu/services/database_service.dart';
 import 'package:thangu/services/ai_service.dart';
 import 'package:thangu/services/real_sms_service.dart';
+import 'package:thangu/services/account_service.dart';
 
 /// Service to read historical SMS messages from device
 /// Syncs existing SMS with the app database
@@ -15,7 +16,7 @@ class SmsHistoryService {
   final DatabaseService _dbService = DatabaseService();
   final AiService _aiService = AiService();
   final RealSmsService _smsService = RealSmsService();
-
+  final AccountService _accountService = AccountService();
   Timer? _scanTimer;
   Timer? _categorizeTimer;
 
@@ -273,22 +274,25 @@ class SmsHistoryService {
   }
 
   /// Parse SMS content into Transaction object
-  /// Now uses AI to better understand merchant and category
+  /// Now uses AI to better understand merchant, category, and account info
   Transaction _parseSms(String body, String sender, int timestamp) {
     final date = DateTime.fromMillisecondsSinceEpoch(timestamp);
 
-    return Transaction(
+    // Extract base transaction
+    final transaction = Transaction(
       id: DateTime.now().millisecondsSinceEpoch.toString() + '_hist',
       amount: _extractAmount(body),
       type: _extractType(body),
       category: 'Pending', // Will be updated by AI
-      description:
-          _extractMerchantName(body), // Clean merchant name instead of raw SMS
+      description: _extractMerchantName(body), // Clean merchant name
       date: date,
       sender: _sanitizeSender(sender),
       isCategorizedByAI: false,
       aiConfidence: 0.0,
     );
+
+    // Attach account information
+    return _accountService.attachAccountInfo(transaction, body);
   }
 
   /// Extract clean merchant name from SMS
