@@ -503,6 +503,82 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _fullScanHistory() async {
+    if (_isScanning) return;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Full History Scan?'),
+        content: const Text(
+            'This will scan the last 90 days of SMS and may take a few minutes. Duplicate transactions will be skipped.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Scan')),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    setState(() => _isScanning = true);
+
+    try {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Row(
+            children: [
+              SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                ),
+              ),
+              SizedBox(width: 12),
+              Text('Scanning 90 days of SMS...'),
+            ],
+          ),
+          backgroundColor: AppTheme.primaryDark,
+          duration: Duration(seconds: 3),
+        ),
+      );
+
+      final count = await _smsHistoryService.loadHistoricalSms(
+        lastDays: 90,
+        useAI: true,
+        isFirstLoad: false,
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Found $count transactions'),
+            backgroundColor: count > 0 ? AppTheme.accentGreen : AppTheme.accent,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error scanning: $e'),
+            backgroundColor: AppTheme.accentRed,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isScanning = false);
+      }
+    }
+  }
+
   void _addTransaction() {
     Navigator.push(
         context,
@@ -678,6 +754,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
               title: 'Scan SMS Now',
               subtitle: 'Scan for new transactions',
               onTap: _scanSms,
+            ),
+            _buildDivider(),
+            _buildNavigationRow(
+              icon: Icons.history_rounded,
+              iconColor: AppTheme.accentOrange,
+              title: 'Full History Scan',
+              subtitle: 'Scan last 90 days (one-time)',
+              onTap: _fullScanHistory,
             ),
             _buildDivider(),
             _buildNavigationRow(
