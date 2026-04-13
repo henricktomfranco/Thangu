@@ -31,6 +31,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   double _transactionAlertThreshold = 100.0;
   int _savingAggression = 1;
   String _themeMode = 'dark';
+  double _initialBalance = 0;
+  DateTime? _initialBalanceDate;
+  bool _hasInitialBalance = false;
 
   // Dynamic Models
   List<String> _availableModels = [];
@@ -150,6 +153,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _transactionAlertThreshold =
           prefs.getDouble('transaction_alert_threshold') ?? 100.0;
       _savingAggression = prefs.getInt('saving_aggression') ?? 1;
+
+      // Load initial balance
+      _initialBalance = prefs.getDouble('initial_balance') ?? 0;
+      final savedDate = prefs.getString('initial_balance_date');
+      if (savedDate != null) {
+        _initialBalanceDate = DateTime.parse(savedDate);
+      }
+      _hasInitialBalance = _initialBalance > 0;
+
       // Initialize with default models
       _availableModels =
           _isOllama ? _defaultOllamaModels : _defaultOpenAiModels;
@@ -167,6 +179,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await prefs.setDouble(
         'transaction_alert_threshold', _transactionAlertThreshold);
     await prefs.setInt('saving_aggression', _savingAggression);
+    if (_hasInitialBalance && _initialBalanceDate != null) {
+      await prefs.setDouble('initial_balance', _initialBalance);
+      await prefs.setString(
+          'initial_balance_date', _initialBalanceDate!.toIso8601String());
+    }
 
     // Also save to AI service
     _aiService.updateConfiguration(
@@ -325,6 +342,111 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (mounted) {
         setState(() => _isCheckingUpdate = false);
       }
+    }
+  }
+
+  Future<void> _setInitialBalance() async {
+    final controller = TextEditingController(
+        text: _initialBalance > 0 ? _initialBalance.toStringAsFixed(0) : '');
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppTheme.surfaceCard,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) => Padding(
+        padding: EdgeInsets.fromLTRB(
+            24, 24, 24, MediaQuery.of(context).viewInsets.bottom + 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Set Initial Balance',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            const Text(
+                'Enter your current account balance. Future transactions will be calculated from this amount.',
+                style: TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
+            if (_hasInitialBalance && _initialBalanceDate != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                  'Current: QAR${_initialBalance.toStringAsFixed(2)} (set on ${_initialBalanceDate!.day}/${_initialBalanceDate!.month}/${_initialBalanceDate!.year})',
+                  style: TextStyle(color: AppTheme.accentOrange, fontSize: 12)),
+            ],
+            const SizedBox(height: 16),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              decoration: InputDecoration(
+                labelText: 'Current Balance (QAR)',
+                hintText: 'e.g., 10000',
+                filled: true,
+                fillColor: AppTheme.surface,
+                border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none),
+              ),
+            ),
+            const SizedBox(height: 24),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () async {
+                  final amount = double.tryParse(controller.text);
+                  if (amount != null && amount >= 0) {
+                    setState(() {
+                      _initialBalance = amount;
+                      _initialBalanceDate = DateTime.now();
+                      _hasInitialBalance = true;
+                    });
+                    await _saveSettings();
+                    if (mounted) Navigator.pop(context);
+                  }
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                ),
+                child: const Text('Save Balance'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _resetInitialBalance() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Reset Balance?'),
+        content: const Text(
+            'This will clear your initial balance. Balance will be calculated from all transactions.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Reset')),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      setState(() {
+        _initialBalance = 0;
+        _initialBalanceDate = null;
+        _hasInitialBalance = false;
+      });
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('initial_balance');
+      await prefs.remove('initial_balance_date');
     }
   }
 
@@ -528,6 +650,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   builder: (_) => const CategoryManagementScreen(),
                 ),
               ),
+            ),
+            _buildDivider(),
+            _buildNavigationRow(
+              icon: Icons.account_balance_wallet_rounded,
+              iconColor: AppTheme.accentGreen,
+              title: 'Set Initial Balance',
+              subtitle: _hasInitialBalance
+                  ? 'QAR${_initialBalance.toStringAsFixed(0)} (${_initialBalanceDate!.day}/${_initialBalanceDate!.month})'
+                  : 'Configure your starting balance',
+              onTap: _setInitialBalance,
             ),
           ]),
 

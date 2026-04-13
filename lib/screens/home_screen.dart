@@ -162,15 +162,48 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       // Track account summaries
       final Map<String, AccountSummary> accountMap = {};
 
+      // Load initial balance for new calculation method
+      double initialBalance = 0;
+      DateTime? initialBalanceDate;
+      final prefs = await SharedPreferences.getInstance();
+      initialBalance = prefs.getDouble('initial_balance') ?? 0;
+      final savedDate = prefs.getString('initial_balance_date');
+      if (savedDate != null) {
+        initialBalanceDate = DateTime.parse(savedDate);
+      }
+      final hasInitialBalance = initialBalance > 0;
+
       // Process transactions
       for (final txn in transactions) {
+        // Skip transactions before initial balance date (for new method)
+        if (hasInitialBalance && initialBalanceDate != null) {
+          if (txn.date.isBefore(initialBalanceDate)) {
+            continue; // Skip old transactions
+          }
+        }
+
         final isCurrentMonth = txn.date.isAfter(startOfMonth);
 
-        // All-time total balance
-        if (txn.type == 'credit') {
-          totalBalance += txn.amount;
+        // Calculate balance based on method
+        if (hasInitialBalance) {
+          // New method: Initial + net since then
+          if (txn.type == 'credit') {
+            totalBalance += txn.amount;
+          } else {
+            totalBalance -= txn.amount;
+          }
         } else {
-          totalBalance -= txn.amount;
+          // Old method: All transactions
+          if (txn.type == 'credit') {
+            totalBalance += txn.amount;
+          } else {
+            totalBalance -= txn.amount;
+          }
+        }
+
+        // Add initial balance for new method
+        if (hasInitialBalance) {
+          totalBalance = initialBalance + totalBalance;
         }
 
         // Monthly stats for current month
