@@ -194,6 +194,7 @@ class DatabaseService {
       }
     }
 
+    query += ' ORDER BY $columnDate DESC';
     query += ' LIMIT $limit';
 
     final List<Map<String, dynamic>> maps = await db.rawQuery(query, whereArgs);
