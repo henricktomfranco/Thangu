@@ -74,7 +74,7 @@ class Budget {
     return {
       'id': id,
       'category': category,
-      'limit': limit,
+      'limit_amount': limit,
       'spent': spent,
       'period_start': periodStart.toIso8601String(),
       'period_end': periodEnd.toIso8601String(),
@@ -88,7 +88,7 @@ class Budget {
     return Budget(
       id: map['id'],
       category: map['category'],
-      limit: (map['limit'] as num).toDouble(),
+      limit: (map['limit_amount'] as num).toDouble(),
       spent: (map['spent'] as num?)?.toDouble() ?? 0.0,
       periodStart: DateTime.parse(map['period_start']),
       periodEnd: DateTime.parse(map['period_end']),
