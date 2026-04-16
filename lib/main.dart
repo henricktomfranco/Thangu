@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'app_theme.dart';
 import 'screens/home_screen.dart';
 import 'services/sms_history_service.dart';
+import 'services/enhanced_sms_service.dart';
 import 'services/ai_service.dart';
 import 'services/proactive_ai_service.dart';
 import 'services/notification_service.dart';
@@ -74,11 +75,21 @@ void main() async {
       print('[Startup] ✓ Loaded $count new transactions');
     }
 
-    // Start background scanning for new SMS every 15 min
+    // Start background scanning for new SMS every 5 min
     smsHistory.startBackgroundScanning();
-    print('[Startup] ✓ Background SMS scanning started (15 min interval)');
+    print('[Startup] ✓ Background SMS scanning started (5 min interval)');
   } catch (e) {
     print('[Startup] ✗ Could not load SMS: $e');
+  }
+
+  // Start real-time SMS listener for NEW incoming SMS
+  print('[Startup] Initializing real-time SMS listener...');
+  try {
+    final enhancedSms = EnhancedSmsService();
+    await enhancedSms.initializeSmsListener();
+    print('[Startup] ✓ Real-time SMS listener active');
+  } catch (e) {
+    print('[Startup] ✗ Could not start SMS listener: $e');
   }
 
   print('[Startup] App initialization complete, launching UI...');

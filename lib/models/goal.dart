@@ -26,6 +26,9 @@ class SavingsGoal {
 
   bool get isAchieved => currentAmount >= targetAmount;
 
+  /// True when deadline passed but goal not yet reached (Issue 14)
+  bool get isOverdue => !isAchieved && targetDate.isBefore(DateTime.now());
+
   Map<String, dynamic> toMap() {
     return {
       'id': id,

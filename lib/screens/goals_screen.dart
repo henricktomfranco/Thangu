@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../app_theme.dart';
 import '../models/goal.dart';
 import '../services/database_service.dart';
+import '../services/ai_service.dart';
 import '../widgets/goal_card.dart';
 
 class GoalsScreen extends StatefulWidget {
@@ -62,6 +63,116 @@ class _GoalsScreenState extends State<GoalsScreen> {
     );
   }
 
+  Future<void> _addMoneyToGoal(SavingsGoal goal) async {
+    final controller = TextEditingController();
+    final result = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppTheme.surfaceCard,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Padding(
+        padding: EdgeInsets.fromLTRB(
+            24, 24, 24, MediaQuery.of(context).viewInsets.bottom + 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Add to ${goal.name}',
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.textPrimary,
+                )),
+            const SizedBox(height: 8),
+            Text(
+              'Current: QAR${goal.currentAmount.toStringAsFixed(0)} / QAR${goal.targetAmount.toStringAsFixed(0)}',
+              style: AppTheme.caption,
+            ),
+            const SizedBox(height: 20),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              autofocus: true,
+              decoration: InputDecoration(
+                filled: true,
+                fillColor: AppTheme.surface,
+                hintText: 'Enter amount',
+                prefixText: 'QAR ',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                _quickAmountButton(50, controller),
+                const SizedBox(width: 8),
+                _quickAmountButton(100, controller),
+                const SizedBox(width: 8),
+                _quickAmountButton(200, controller),
+                const SizedBox(width: 8),
+                _quickAmountButton(500, controller),
+              ],
+            ),
+            const SizedBox(height: 24),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () => Navigator.pop(context, 'add'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: const Text('Add Money'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (result == 'add' && controller.text.isNotEmpty) {
+      final amount = double.tryParse(controller.text);
+      if (amount != null && amount > 0) {
+        final updatedGoal = SavingsGoal(
+          id: goal.id,
+          name: goal.name,
+          targetAmount: goal.targetAmount,
+          currentAmount: goal.currentAmount + amount,
+          targetDate: goal.targetDate,
+          category: goal.category,
+          icon: goal.icon,
+        );
+        await DatabaseService().updateGoal(updatedGoal);
+        _loadGoals();
+      }
+    }
+  }
+
+  Widget _quickAmountButton(int amount, TextEditingController controller) {
+    return GestureDetector(
+      onTap: () => controller.text = amount.toString(),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: AppTheme.primary.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: AppTheme.primary.withOpacity(0.2)),
+        ),
+        child: Text('QAR$amount',
+            style: const TextStyle(color: AppTheme.primaryLight)),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     // Calculate summary stats
@@ -99,6 +210,7 @@ class _GoalsScreenState extends State<GoalsScreen> {
                           return GoalCard(
                             goal: _goals[i],
                             onTap: () => _showGoalForm(_goals[i]),
+                            onAddMoney: () => _addMoneyToGoal(_goals[i]),
                           );
                         }),
                         const SizedBox(height: 80),
@@ -308,6 +420,55 @@ class _GoalFormState extends State<GoalForm> {
     widget.onGoalSaved();
   }
 
+  Future<void> _aiSuggestTarget() async {
+    // Get average monthly income from recent transactions
+    final dbService = DatabaseService();
+    final transactions = await dbService.getTransactions(limit: 100);
+
+    double monthlyIncome = 0;
+    final now = DateTime.now();
+    for (final txn in transactions) {
+      if (txn.date.isAfter(DateTime(now.year, now.month - 3, 1)) &&
+          txn.type == 'credit') {
+        monthlyIncome += txn.amount;
+      }
+    }
+    monthlyIncome = monthlyIncome / 3; // Average over 3 months
+
+    if (monthlyIncome <= 0) {
+      // Default suggestion if no income data
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text(
+                  'No income transactions found to base suggestions on.')),
+        );
+      }
+      return;
+    }
+
+    final aiService = AiService();
+    final result = await aiService.calculateGoalSavings(
+      targetAmount: monthlyIncome * 12, // Default: 1 year of income
+      currentAmount: 0,
+      targetDate: DateTime.now().add(const Duration(days: 365)),
+      monthlyIncome: monthlyIncome,
+    );
+
+    final suggested = result['monthlyNeeded'] as double;
+    final months = result['monthsRemaining'] as int;
+
+    _targetAmountController.text = (suggested * months).toStringAsFixed(0);
+    _targetDate = DateTime.now().add(Duration(days: months * 30));
+    setState(() {});
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+          content: Text(
+              'AI suggests: Save QAR${suggested.toStringAsFixed(0)}/month to reach your goal!')),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -332,6 +493,13 @@ class _GoalFormState extends State<GoalForm> {
                 style: AppTheme.heading3,
               ),
               const Spacer(),
+              TextButton(
+                onPressed: _aiSuggestTarget,
+                child: const Text('AI Suggest',
+                    style: TextStyle(
+                        color: AppTheme.accentOrange,
+                        fontWeight: FontWeight.w600)),
+              ),
               TextButton(
                 onPressed: _saveGoal,
                 child: const Text('Save',
@@ -366,7 +534,7 @@ class _GoalFormState extends State<GoalForm> {
                     controller: _targetAmountController,
                     style: const TextStyle(color: AppTheme.textPrimary),
                     decoration: const InputDecoration(
-                      labelText: 'Target Amount (\$)',
+                      labelText: 'Target Amount (QAR)',
                       prefixIcon: Icon(Icons.attach_money_rounded,
                           color: AppTheme.textTertiary),
                     ),

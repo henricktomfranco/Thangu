@@ -17,7 +17,7 @@ class DatabaseService {
   Database? _database;
 
   static const String _databaseName = 'thangu.db';
-  static const int _databaseVersion = 1;
+  static const int _databaseVersion = 2; // Incremented for migrations
 
   static const String tableTransactions = 'transactions';
   static const String tableGoals = 'goals';
@@ -73,7 +73,20 @@ class DatabaseService {
       path,
       version: _databaseVersion,
       onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
     );
+  }
+
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      try {
+        await db.execute('ALTER TABLE $tableTransactions ADD COLUMN $columnAccountNumber TEXT');
+        await db.execute('ALTER TABLE $tableTransactions ADD COLUMN $columnAccountName TEXT');
+        await db.execute('ALTER TABLE $tableTransactions ADD COLUMN $columnAccountType TEXT');
+      } catch (e) {
+        // Fallback if already exist
+      }
+    }
   }
 
   Future<void> _onCreate(Database db, int version) async {
@@ -174,9 +187,10 @@ class DatabaseService {
   }
 
   Future<List<app_transaction.Transaction>> getTransactions(
-      {int limit = 50, DateTime? startDate, DateTime? endDate}) async {
+      {int limit = 1000, DateTime? startDate, DateTime? endDate}) async {
     final db = await database;
-    String query = 'SELECT * FROM $tableTransactions';
+    
+    String? whereClause;
     List<dynamic> whereArgs = [];
 
     if (startDate != null || endDate != null) {
@@ -189,15 +203,17 @@ class DatabaseService {
         conditions.add('$columnDate <= ?');
         whereArgs.add(endDate.toIso8601String());
       }
-      if (conditions.isNotEmpty) {
-        query += ' WHERE ${conditions.join(' AND ')}';
-      }
+      whereClause = conditions.join(' AND ');
     }
 
-    query += ' ORDER BY $columnDate DESC';
-    query += ' LIMIT $limit';
-
-    final List<Map<String, dynamic>> maps = await db.rawQuery(query, whereArgs);
+    final List<Map<String, dynamic>> maps = await db.query(
+      tableTransactions,
+      where: whereClause,
+      whereArgs: whereArgs.isNotEmpty ? whereArgs : null,
+      orderBy: '$columnDate DESC',
+      limit: limit,
+    );
+    
     return List.generate(
         maps.length, (i) => app_transaction.Transaction.fromMap(maps[i]));
   }

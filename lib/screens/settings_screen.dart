@@ -295,7 +295,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             RegExp(r'"tag_name":\s*"v([^"]+)"').firstMatch(response.body);
         if (tagMatch != null) {
           final latestVersion = 'v${tagMatch.group(1)}';
-          final currentVersion = 'v1.0.4';
+          final currentVersion = 'v$_appVersion';
 
           if (latestVersion.compareTo(currentVersion) > 0) {
             if (mounted) {

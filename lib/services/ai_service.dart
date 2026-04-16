@@ -3,8 +3,15 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/transaction.dart';
+import '../models/investment.dart';
+import '../models/budget.dart';
 
 class AiService {
+  // Singleton — ensures settings propagate to all consumers (Issue 19)
+  static final AiService _instance = AiService._internal();
+  factory AiService() => _instance;
+  AiService._internal();
+
   // Configuration
   static const String defaultOllamaUrl = 'http://127.0.0.1:11434';
 
@@ -53,7 +60,7 @@ class AiService {
     if (baseUrl != null) _baseUrl = baseUrl;
     if (modelName != null) _modelName = modelName;
     if (apiKey != null) _apiKey = apiKey;
-    if (isOllama != null) _isOllama = isOllama!;
+    if (isOllama != null) _isOllama = isOllama;
   }
 
   // Save configuration to persistent storage
@@ -70,7 +77,6 @@ class AiService {
     if (_isOllama) {
       return '$_baseUrl/api/generate';
     } else {
-      // For OpenAI compatible endpoints
       return '$_baseUrl/v1/chat/completions';
     }
   }
@@ -79,11 +85,7 @@ class AiService {
   Map<String, String> _buildHeaders() {
     final headers = <String, String>{'Content-Type': 'application/json'};
     if (_apiKey.isNotEmpty) {
-      if (_isOllama) {
-        headers['Authorization'] = 'Bearer $_apiKey';
-      } else {
-        headers['Authorization'] = 'Bearer $_apiKey';
-      }
+      headers['Authorization'] = 'Bearer $_apiKey';
     }
     return headers;
   }
@@ -108,16 +110,11 @@ class AiService {
   }
 
   /// Fetch available models from configured server
-  /// Returns list of model names, empty list if connection fails
   Future<List<String>> fetchAvailableModels(String serverUrl,
       {bool isOllama = true, String? apiKey}) async {
     try {
-      String modelsUrl;
-      if (isOllama) {
-        modelsUrl = '$serverUrl/api/tags';
-      } else {
-        modelsUrl = '$serverUrl/v1/models';
-      }
+      final String modelsUrl =
+          isOllama ? '$serverUrl/api/tags' : '$serverUrl/v1/models';
 
       final headers = <String, String>{'Content-Type': 'application/json'};
       if (apiKey != null && apiKey.isNotEmpty) {
@@ -125,10 +122,7 @@ class AiService {
       }
 
       final response = await http
-          .get(
-            Uri.parse(modelsUrl),
-            headers: headers,
-          )
+          .get(Uri.parse(modelsUrl), headers: headers)
           .timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
@@ -136,34 +130,25 @@ class AiService {
         final List<String> models = [];
 
         if (isOllama) {
-          // Ollama response format: {"models": [{"name": "llama2", ...}, ...]}
           final modelsList = responseData['models'] as List?;
           if (modelsList != null) {
             for (final model in modelsList) {
               final modelName = model['name'] as String?;
-              if (modelName != null) {
-                models.add(modelName);
-              }
+              if (modelName != null) models.add(modelName);
             }
           }
         } else {
-          // OpenAI response format: {"data": [{"id": "gpt-4", ...}, ...]}
           final dataList = responseData['data'] as List?;
           if (dataList != null) {
             for (final model in dataList) {
               final modelId = model['id'] as String?;
-              if (modelId != null) {
-                models.add(modelId);
-              }
+              if (modelId != null) models.add(modelId);
             }
           }
         }
-
-        return models.isNotEmpty ? models : [];
-      } else {
-        print('[AiService] Failed to fetch models: ${response.statusCode}');
-        return [];
+        return models;
       }
+      return [];
     } catch (e) {
       print('[AiService] Error fetching models: $e');
       return [];
@@ -203,51 +188,53 @@ Category:''';
   }
 
   Future<String?> categorizeTransaction(Transaction transaction) async {
+    // Issue 18: skip if already reliably categorized
+    if (transaction.isCategorizedByAI && transaction.aiConfidence >= 0.8) {
+      return transaction.category;
+    }
+
     try {
       final prompt = _buildCategorizationPrompt(transaction);
 
-      final url = _buildApiUrl();
-      final headers = _buildHeaders();
-      final body = _buildRequestBody(prompt);
-
-      final response = await http.post(
-        Uri.parse(url),
-        headers: headers,
-        body: json.encode(body),
-      );
+      final response = await http
+          .post(
+            Uri.parse(_buildApiUrl()),
+            headers: _buildHeaders(),
+            body: json.encode(_buildRequestBody(prompt)),
+          )
+          .timeout(const Duration(seconds: 15)); // Issue 17: added timeout
 
       if (response.statusCode == 200) {
         final Map<String, dynamic> responseData = json.decode(response.body);
-        final String aiResponse = responseData['response']?.trim() ?? '';
-
-        // Validate the response is a known category
-        if (_knownCategories.contains(aiResponse)) {
-          return aiResponse;
+        final String aiResponse;
+        if (_isOllama) {
+          aiResponse = responseData['response']?.toString().trim() ?? '';
         } else {
-          // Try to find closest match or default to Other
-          final String normalizedResponse =
-              aiResponse.replaceAll('&', 'and').replaceAll('/', ' & ').trim();
-
-          final String? matchedCategory = _knownCategories.firstWhere(
-            (category) =>
-                category
-                    .toLowerCase()
-                    .contains(normalizedResponse.toLowerCase()) ||
-                normalizedResponse
-                    .toLowerCase()
-                    .contains(category.toLowerCase()),
-            orElse: () => 'Other',
-          );
-
-          return matchedCategory;
+          final choices = responseData['choices'] as List?;
+          aiResponse = choices != null && choices.isNotEmpty
+              ? choices[0]['message']['content']?.toString().trim() ?? ''
+              : '';
         }
+
+        if (_knownCategories.contains(aiResponse)) return aiResponse;
+
+        final String normalizedResponse =
+            aiResponse.replaceAll('&', 'and').replaceAll('/', ' & ').trim();
+        return _knownCategories.firstWhere(
+          (category) =>
+              category
+                  .toLowerCase()
+                  .contains(normalizedResponse.toLowerCase()) ||
+              normalizedResponse
+                  .toLowerCase()
+                  .contains(category.toLowerCase()),
+          orElse: () => 'Other',
+        );
       } else {
         throw Exception(
             'Failed to categorize transaction: ${response.statusCode}');
       }
     } catch (e) {
-      // If API is not available or any error occurs, return null
-      // so the app can fall back to manual categorization
       return null;
     }
   }
@@ -255,25 +242,19 @@ Category:''';
   /// General purpose AI response generator
   Future<String> generateResponse(String prompt) async {
     try {
-      final url = _buildApiUrl();
-      final headers = _buildHeaders();
-      final body = _buildRequestBody(prompt);
-
       final response = await http
           .post(
-            Uri.parse(url),
-            headers: headers,
-            body: json.encode(body),
+            Uri.parse(_buildApiUrl()),
+            headers: _buildHeaders(),
+            body: json.encode(_buildRequestBody(prompt)),
           )
-          .timeout(const Duration(seconds: 10));
+          .timeout(const Duration(seconds: 30));
 
       if (response.statusCode == 200) {
         final Map<String, dynamic> responseData = json.decode(response.body);
-
         if (_isOllama) {
           return responseData['response']?.toString().trim() ?? '';
         } else {
-          // OpenAI format
           final choices = responseData['choices'] as List?;
           if (choices != null && choices.isNotEmpty) {
             return choices[0]['message']['content']?.toString().trim() ?? '';
@@ -315,24 +296,29 @@ Provide advice on:
 Keep your response friendly, encouraging, and under 150 words.
 ''';
 
-      final url = _buildApiUrl();
-      final headers = _buildHeaders();
-      final body = _buildRequestBody(prompt);
-
-      final response = await http.post(
-        Uri.parse(_buildApiUrl()),
-        headers: _buildHeaders(),
-        body: json.encode(_buildRequestBody(prompt)),
-      );
+      // Issue 16: removed duplicate variable declarations — uses helpers directly
+      final response = await http
+          .post(
+            Uri.parse(_buildApiUrl()),
+            headers: _buildHeaders(),
+            body: json.encode(_buildRequestBody(prompt)),
+          )
+          .timeout(const Duration(seconds: 30));
 
       if (response.statusCode == 200) {
         final Map<String, dynamic> responseData = json.decode(response.body);
-        return responseData['response']?.trim() ??
-            "I'm having trouble connecting to my knowledge base right now. Let's focus on tracking your transactions!";
-      } else {
-        throw Exception(
-            'Failed to get financial advice: ${response.statusCode}');
+        if (_isOllama) {
+          return responseData['response']?.trim() ??
+              "I'm having trouble connecting to my knowledge base right now. Let's focus on tracking your transactions!";
+        } else {
+          final choices = responseData['choices'] as List?;
+          if (choices != null && choices.isNotEmpty) {
+            return choices[0]['message']['content']?.toString().trim() ??
+                _getFallbackAdvice(monthlyIncome, monthlyExpenses);
+          }
+        }
       }
+      throw Exception('Failed to get financial advice: ${response.statusCode}');
     } catch (e) {
       return _getFallbackAdvice(monthlyIncome, monthlyExpenses);
     }
@@ -341,7 +327,6 @@ Keep your response friendly, encouraging, and under 150 words.
   String _summarizeRecentTransactions(List<Transaction> transactions) {
     if (transactions.isEmpty) return "No recent transactions available.";
 
-    // Group by category and calculate totals
     final Map<String, double> categoryTotals = {};
     for (final txn in transactions.where((t) => t.type == 'debit')) {
       categoryTotals.update(txn.category, (value) => value + txn.amount,
@@ -358,7 +343,8 @@ Keep your response friendly, encouraging, and under 150 words.
 
   String _getFallbackAdvice(double monthlyIncome, double monthlyExpenses) {
     final double savings = monthlyIncome - monthlyExpenses;
-    final double savingsRate = (savings / monthlyIncome) * 100;
+    final double savingsRate =
+        monthlyIncome > 0 ? (savings / monthlyIncome) * 100 : 0;
 
     if (savingsRate >= 20) {
       return "Great job! You're saving ${savingsRate.toStringAsFixed(1)}% of your income. Consider investing a portion of your savings for long-term growth.";
@@ -414,8 +400,7 @@ FORMAT:
 User's message: "${userGoals.isEmpty ? "I want to save more money" : userGoals.first}"
 ''';
 
-      final response = await generateResponse(prompt);
-      return response;
+      return await generateResponse(prompt);
     } catch (e) {
       return _getFallbackAdvice(monthlyIncome, monthlyExpenses);
     }
@@ -448,8 +433,8 @@ User's message: "${userGoals.isEmpty ? "I want to save more money" : userGoals.f
 
       final StringBuffer analysis = StringBuffer();
       analysis.writeln("📊 Spending Analysis:\n");
-      analysis.writeln(
-          "*Total Expenses:* QAR ${totalExpenses.toStringAsFixed(2)}\n");
+      analysis
+          .writeln("*Total Expenses:* QAR ${totalExpenses.toStringAsFixed(2)}\n");
       analysis.writeln("*Top Categories:*");
 
       for (var i = 0; i < sortedCategories.length && i < 5; i++) {
@@ -472,5 +457,164 @@ User's message: "${userGoals.isEmpty ? "I want to save more money" : userGoals.f
     } catch (e) {
       return "Unable to analyze spending patterns right now.";
     }
+  }
+
+  /// Calculate optimal monthly savings for a goal
+  Future<Map<String, dynamic>> calculateGoalSavings({
+    required double targetAmount,
+    required double currentAmount,
+    required DateTime targetDate,
+    required double monthlyIncome,
+  }) async {
+    final now = DateTime.now();
+    final monthsRemaining = targetDate.difference(now).inDays / 30;
+
+    if (monthsRemaining <= 0) {
+      return {
+        'monthlyNeeded': targetAmount - currentAmount,
+        'isFeasible': true,
+        'message': 'Goal deadline has passed. Consider extending the date.',
+      };
+    }
+
+    final remaining = targetAmount - currentAmount;
+    final monthlyNeeded = remaining / monthsRemaining;
+    final affordable = monthlyIncome * 0.2;
+
+    final isFeasible = monthlyNeeded <= affordable;
+
+    final String message = isFeasible
+        ? "Save QAR ${monthlyNeeded.toStringAsFixed(0)}/month to reach your goal."
+        : "QAR ${monthlyNeeded.toStringAsFixed(0)}/month exceeds 20% of income (QAR ${affordable.toStringAsFixed(0)}). Consider extending your target date.";
+
+    return {
+      'monthlyNeeded': monthlyNeeded,
+      'isFeasible': isFeasible,
+      'monthsRemaining': monthsRemaining.round(),
+      'message': message,
+      'recommendedTargetDate': now.add(
+          Duration(days: (remaining / (affordable * 0.8) * 30).ceil().round())),
+    };
+  }
+
+  /// Get AI-powered budget recommendations based on spending history
+  Future<List<Map<String, dynamic>>> getBudgetRecommendations({
+    required double monthlyIncome,
+    required List<Transaction> transactions,
+    required List<Budget> existingBudgets,
+  }) async {
+    final now = DateTime.now();
+    // Issue 7: fixed — was `now.month` (wrong), now correctly uses `now.day`
+    final threeMonthsAgo = DateTime(now.year, now.month - 3, now.day);
+
+    final recentTxns = transactions
+        .where((t) => t.date.isAfter(threeMonthsAgo) && t.type == 'debit')
+        .toList();
+
+    final Map<String, List<double>> categoryHistory = {};
+    for (final txn in recentTxns) {
+      categoryHistory.putIfAbsent(txn.category, () => []).add(txn.amount);
+    }
+
+    final categoryPercentages = {
+      'Bills & Utilities': 0.15,
+      'Groceries': 0.12,
+      'Food & Dining': 0.10,
+      'Transportation': 0.08,
+      'Shopping': 0.08,
+      'Entertainment': 0.05,
+      'Healthcare': 0.05,
+      'Personal Care': 0.03,
+      'Education': 0.05,
+    };
+
+    final recommendations = <Map<String, dynamic>>[];
+
+    for (final entry in categoryHistory.entries) {
+      final avgSpending =
+          entry.value.reduce((a, b) => a + b) / entry.value.length;
+      final category = entry.key;
+      final suggestedLimit =
+          monthlyIncome * (categoryPercentages[category] ?? 0.05);
+      final existingBudget =
+          existingBudgets.where((b) => b.category == category).firstOrNull;
+
+      recommendations.add({
+        'category': category,
+        'currentAvg': avgSpending,
+        'suggestedLimit': suggestedLimit,
+        'existingLimit': existingBudget?.limit ?? 0,
+        'change': existingBudget != null
+            ? suggestedLimit - existingBudget.limit
+            : null,
+      });
+    }
+
+    recommendations.sort((a, b) =>
+        (b['currentAvg'] as double).compareTo(a['currentAvg'] as double));
+
+    return recommendations;
+  }
+
+  /// Analyze investment portfolio and provide insights
+  Future<String> analyzeInvestments(List<Investment> investments) async {
+    if (investments.isEmpty) {
+      return "No investments tracked yet. Add your first investment to get AI insights.";
+    }
+
+    final Map<InvestmentType, double> allocation = {};
+    double totalValue = 0;
+
+    for (final inv in investments) {
+      final value = inv.totalValue;
+      allocation.update(inv.type, (v) => v + value, ifAbsent: () => value);
+      totalValue += value;
+    }
+
+    if (totalValue == 0) return "No investment value data available.";
+
+    final StringBuffer analysis = StringBuffer();
+    analysis.writeln("📊 **Portfolio Analysis**\n");
+    analysis.writeln("*Total Value: QAR ${totalValue.toStringAsFixed(2)}*\n");
+    analysis.writeln("*Allocation:*");
+
+    for (final entry in allocation.entries) {
+      final pct = (entry.value / totalValue * 100).toStringAsFixed(1);
+      final typeName =
+          InvestmentType.values[entry.key.index].toString().split('.').last;
+      analysis
+          .writeln("• $typeName: QAR ${entry.value.toStringAsFixed(2)} ($pct%)");
+    }
+
+    final sorted = allocation.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    if (sorted.isNotEmpty && (sorted.first.value / totalValue) > 0.5) {
+      analysis.writeln(
+          "\n⚠️ *Warning:* ${sorted.first.key.toString().split('.').last} makes up >50% of your portfolio. Consider diversifying.");
+    }
+
+    final stockPct = ((allocation[InvestmentType.stock] ?? 0) +
+            (allocation[InvestmentType.etf] ?? 0)) /
+        totalValue *
+        100;
+    if (stockPct < 40) {
+      analysis.writeln(
+          "\n💡 *Suggestion:* Your portfolio is conservative. Consider increasing stocks for long-term growth.");
+    } else if (stockPct > 80) {
+      analysis.writeln(
+          "\n💡 *Suggestion:* Your portfolio is aggressive. Consider adding bonds or other stable assets for balance.");
+    }
+
+    final totalCost =
+        investments.fold<double>(0, (sum, inv) => sum + inv.totalCost);
+    final totalPL = totalValue - totalCost;
+    final plPct = totalCost > 0 ? (totalPL / totalCost * 100) : 0.0;
+
+    analysis.writeln("\n📈 *Performance:*");
+    analysis.writeln("• Cost Basis: QAR ${totalCost.toStringAsFixed(2)}");
+    analysis.writeln(
+        "• P/L: QAR ${totalPL.toStringAsFixed(2)} (${plPct >= 0 ? '+' : ''}${plPct.toStringAsFixed(1)}%)");
+
+    return analysis.toString();
   }
 }

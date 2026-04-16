@@ -27,14 +27,33 @@ class _BillRemindersScreenState extends State<BillRemindersScreen> {
   Future<void> _loadBills() async {
     setState(() => _isLoading = true);
     try {
-      final bills = await _dbService.getBillReminders();
+      var bills = await _dbService.getBillReminders();
+      
+      // Auto-advance overdue recurring bills
+      bool updatedAny = false;
+      for (int i = 0; i < bills.length; i++) {
+        final bill = bills[i];
+        if (bill.enabled && bill.isDue && bill.recurrence != RecurrencePeriod.once) {
+          final nextDue = bill.getNextDueDate();
+          if (nextDue != null && nextDue.isAfter(bill.dueDate)) {
+            final updatedBill = bill.copyWith(dueDate: nextDue);
+            await _dbService.updateBillReminder(updatedBill);
+            bills[i] = updatedBill;
+            updatedAny = true;
+          }
+        }
+      }
+      if (updatedAny) {
+        bills = await _dbService.getBillReminders();
+      }
+
       setState(() {
         _bills = bills;
         _isLoading = false;
       });
       await _scheduleReminders();
     } catch (e) {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:thangu/services/real_sms_service.dart';
+import 'package:thangu/services/sms_history_service.dart';
 import 'package:thangu/services/permission_service.dart';
 import '../app_theme.dart';
 import '../models/transaction.dart';
@@ -38,7 +39,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
   Future<void> _loadTransactions() async {
     setState(() => _isLoading = true);
     try {
-      final transactions = await _dbService.getTransactions();
+      final transactions = await _dbService.getTransactions(limit: 500);
       setState(() {
         _transactions = transactions;
         _applyFilters();
@@ -66,14 +67,17 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
     }).toList();
   }
 
-  void _startSmsListener() {
+  void _startSmsListener() async {
     setState(() => _isProcessingSms = true);
-    Future.delayed(const Duration(seconds: 3), () {
+    try {
+      final SmsHistoryService smsHistory = SmsHistoryService();
+      await smsHistory.forceScanSms(useAI: true);
+    } finally {
       if (mounted) {
         setState(() => _isProcessingSms = false);
         _loadTransactions();
       }
-    });
+    }
   }
 
   void _editTransaction(Transaction transaction) {

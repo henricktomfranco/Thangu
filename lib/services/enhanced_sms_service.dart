@@ -4,12 +4,19 @@ import 'package:thangu/models/transaction.dart';
 import 'package:thangu/services/proactive_ai_service.dart';
 import 'package:thangu/services/database_service.dart';
 import 'package:thangu/services/ai_service.dart';
+import 'package:thangu/services/notification_service.dart';
+import 'package:thangu/services/account_service.dart';
 
 /// Enhanced SMS Service with real Android SMS integration
 /// Listens for incoming SMS messages and automatically creates transactions
 class EnhancedSmsService {
   static const String _channelName = 'com.example.thangu/sms';
   static const MethodChannel _channel = MethodChannel(_channelName);
+
+  // Singleton so all parts of the app share one stream
+  static final EnhancedSmsService _instance = EnhancedSmsService._internal();
+  factory EnhancedSmsService() => _instance;
+  EnhancedSmsService._internal();
 
   // Stream controller for emitting new transactions
   final StreamController<Transaction> _transactionController =
@@ -20,19 +27,7 @@ class EnhancedSmsService {
   final DatabaseService _dbService = DatabaseService();
   final AiService _aiService = AiService();
   final ProactiveAiService _proactiveAiService = ProactiveAiService();
-
-  // Bank SMS patterns for better extraction
-  static final Map<String, RegExp> _bankPatterns = {
-    'amount': RegExp(
-      r'(?:QAR|INR|Rs\.?|₹)\s*([0-9,]+\.?[0-9]*)',
-      caseSensitive: false,
-    ),
-    'account':
-        RegExp(r'A/c\s*(?:No\.?|Number)?[:\s]?(\w+)', caseSensitive: false),
-    'refNo': RegExp(
-        r'(?:Ref|Reference|Txn|Transaction)\s*(?:No\.?|ID)?[:\s]?(\w+)',
-        caseSensitive: false),
-  };
+  final AccountService _accountService = AccountService();
 
   bool _isListening = false;
 
@@ -87,9 +82,10 @@ class EnhancedSmsService {
       final history = await _dbService.getTransactions();
       final nudge =
           await _proactiveAiService.analyzeNewTransaction(transaction, history);
-      if (nudge != null) {
+      if (nudge != null && nudge.isNotEmpty && nudge != "null") {
         print('[ProactiveAi] Savings Nudge: $nudge');
-        // In a real app, this would trigger a push notification or an in-app alert
+        // Issue 23: Wire ProactiveAI nudge to NotificationService
+        await NotificationService().showProactiveNudge(nudge, transaction.id);
       }
 
       print('[SmsService] Transaction saved: ${transaction.id}');
@@ -98,8 +94,25 @@ class EnhancedSmsService {
     }
   }
 
-  /// Check if SMS is financial (contains transaction indicators)
-  bool _isFinancialSms(String sms) {
+  /// Check if SMS is financial (Issue 21: Added OTP exclusion)
+  bool _isFinancialSms(String body) {
+    final lowerBody = body.toLowerCase();
+
+    // OTP/authentication SMS must be excluded FIRST
+    if (lowerBody.contains('otp') ||
+        lowerBody.contains('authentication') ||
+        lowerBody.contains('login') ||
+        lowerBody.contains('password') ||
+        lowerBody.contains('رمز') ||
+        lowerBody.contains('كلمة سر') ||
+        lowerBody.contains('تأكيد') ||
+        lowerBody.contains('verification') ||
+        lowerBody.contains('كود') ||
+        lowerBody.contains('one time') ||
+        lowerBody.contains('do not share')) {
+      return false;
+    }
+
     final financialKeywords = [
       'debit',
       'credit',
@@ -110,21 +123,20 @@ class EnhancedSmsService {
       'balance',
       'account',
       'transaction',
-      'rs.',
-      'inr',
-      '₹',
       'amount',
       'purchased',
       'spending',
+      'qar',
+      'qr',
+      'ريال'
     ];
 
-    final lowerSms = sms.toLowerCase();
-    return financialKeywords.any((keyword) => lowerSms.contains(keyword));
+    return financialKeywords.any((keyword) => lowerBody.contains(keyword));
   }
 
   /// Parse SMS content and extract transaction details
   Transaction _parseSmsContent(String smsBody, String sender) {
-    return Transaction(
+    final transaction = Transaction(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       amount: _extractAmount(smsBody),
       type: _extractType(smsBody),
@@ -135,17 +147,31 @@ class EnhancedSmsService {
       isCategorizedByAI: false,
       aiConfidence: 0.0,
     );
+    
+    return _accountService.attachAccountInfo(transaction, smsBody);
   }
 
-  /// Extract amount from SMS using bank patterns
+  /// Extract amount from SMS using robust patterns (Issue 22: Synced with SmsHistoryService)
   double _extractAmount(String smsBody) {
     try {
-      final match = _bankPatterns['amount']!.firstMatch(smsBody);
+      final RegExp regExp = RegExp(
+        r'(?:Rs\.?|INR|₹|QAR|QR\.?|AED|SAR|USD|\$|EUR|€|GBP|£)\s*([0-9,]+\.?[0-9]*)',
+        caseSensitive: false,
+      );
+      final Match? match = regExp.firstMatch(smsBody);
       if (match != null) {
-        // Extract the number part and remove commas
         String amountStr = match.group(1) ?? '0';
         amountStr = amountStr.replaceAll(',', '');
         return double.parse(amountStr);
+      }
+
+      final RegExp fallbackRegExp = RegExp(r'([0-9]{2,}(?:\.[0-9]{2})?)\b');
+      final Match? fallbackMatch = fallbackRegExp.firstMatch(smsBody);
+      if (fallbackMatch != null) {
+        String amountStr = fallbackMatch.group(1) ?? '0';
+        amountStr = amountStr.replaceAll(',', '');
+        final amount = double.parse(amountStr);
+        if (amount > 0.1 && amount < 1000000) return amount;
       }
     } catch (e) {
       print('[SmsService] Error extracting amount: $e');
@@ -175,7 +201,7 @@ class EnhancedSmsService {
   String _extractDescription(String smsBody) {
     // Remove sensitive information pattern
     String cleaned = smsBody.replaceAll(
-      RegExp(r'(OTP|PIN|CVV|ATM|Card|A/c|Account)[:\s]+[\w\d]+'),
+      RegExp(r'(OTP|PIN|CVV|ATM|Card|A/c|Account)[:\s]+[\w\d]+', caseSensitive: false),
       '[REDACTED]',
     );
 

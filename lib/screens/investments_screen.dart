@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import '../app_theme.dart';
 import '../services/database_service.dart';
 import '../models/investment.dart';
+import '../services/ai_service.dart';
 
 class InvestmentsScreen extends StatefulWidget {
   const InvestmentsScreen({super.key});
@@ -32,6 +33,80 @@ class _InvestmentsScreenState extends State<InvestmentsScreen> {
       });
     } catch (e) {
       setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _showAIInsights(BuildContext context) async {
+    if (_investments.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Add investments first to get AI insights.')),
+      );
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      final aiService = AiService();
+      final insights = await aiService.analyzeInvestments(_investments);
+
+      setState(() => _isLoading = false);
+
+      if (mounted) {
+        showModalBottomSheet(
+          context: context,
+          backgroundColor: AppTheme.surfaceCard,
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          builder: (context) => Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.auto_awesome,
+                        color: AppTheme.accentOrange),
+                    const SizedBox(width: 8),
+                    const Text('AI Portfolio Analysis',
+                        style: TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Flexible(
+                  child: SingleChildScrollView(
+                    child: Text(insights,
+                        style: const TextStyle(fontSize: 14, height: 1.5)),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.pop(context),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.primary,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                    child: const Text('Close'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      setState(() => _isLoading = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
     }
   }
 
@@ -221,6 +296,15 @@ class _InvestmentsScreenState extends State<InvestmentsScreen> {
               color: AppTheme.textPrimary,
               fontWeight: FontWeight.bold,
             )),
+        actions: [
+          TextButton.icon(
+            onPressed: () => _showAIInsights(context),
+            icon: const Icon(Icons.auto_awesome,
+                size: 18, color: AppTheme.accentOrange),
+            label: const Text('AI Insights',
+                style: TextStyle(color: AppTheme.accentOrange, fontSize: 13)),
+          ),
+        ],
       ),
       body: _isLoading
           ? const Center(

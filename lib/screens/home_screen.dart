@@ -3,6 +3,9 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:thangu/screens/analytics_screen.dart';
 import 'package:thangu/services/account_service.dart';
+import 'package:thangu/services/sms_history_service.dart';
+import 'package:thangu/services/enhanced_sms_service.dart';
+import 'dart:async';
 import '../app_theme.dart';
 import '../services/database_service.dart';
 import '../models/account_summary.dart';
@@ -28,6 +31,9 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   final DatabaseService _dbService = DatabaseService();
   final AccountService _accountService = AccountService();
+  final SmsHistoryService _smsHistoryService = SmsHistoryService();
+  final EnhancedSmsService _enhancedSmsService = EnhancedSmsService();
+  StreamSubscription? _smsSubscription;
 
   List<app_txn.Transaction> _recentTransactions = [];
   List<SavingsGoal> _goals = [];
@@ -61,6 +67,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       curve: Curves.easeOut,
     );
     _loadData();
+
+    // Listen for real-time incoming SMS transactions and auto-refresh UI
+    _smsSubscription = _enhancedSmsService.transactionStream.listen((_) {
+      if (mounted) {
+        _loadData();
+      }
+    });
   }
 
   // Show account selection dialog
@@ -111,6 +124,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   @override
   void dispose() {
+    _smsSubscription?.cancel();
     _fadeController.dispose();
     super.dispose();
   }
@@ -146,6 +160,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
     try {
+      // Scan for new SMS before loading data
+      await _smsHistoryService.forceScanSms(useAI: true);
+
       // Get ALL transactions (filter by account if selected)
       final transactions = await _dbService.getTransactions(
           startDate: DateTime.now().subtract(Duration(days: 365 * 10)));
@@ -173,6 +190,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       }
       final hasInitialBalance = initialBalance > 0;
 
+      // Calculate net change from transactions (not including initial balance)
+      double netFromTransactions = 0;
+
       // Process transactions
       for (final txn in transactions) {
         // Skip transactions before initial balance date (for new method)
@@ -184,26 +204,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
         final isCurrentMonth = txn.date.isAfter(startOfMonth);
 
-        // Calculate balance based on method
-        if (hasInitialBalance) {
-          // New method: Initial + net since then
-          if (txn.type == 'credit') {
-            totalBalance += txn.amount;
-          } else {
-            totalBalance -= txn.amount;
-          }
+        // Calculate balance - accumulate net from transactions only
+        if (txn.type == 'credit') {
+          netFromTransactions += txn.amount;
         } else {
-          // Old method: All transactions
-          if (txn.type == 'credit') {
-            totalBalance += txn.amount;
-          } else {
-            totalBalance -= txn.amount;
-          }
-        }
-
-        // Add initial balance for new method
-        if (hasInitialBalance) {
-          totalBalance = initialBalance + totalBalance;
+          netFromTransactions -= txn.amount;
         }
 
         // Monthly stats for current month
@@ -237,6 +242,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           currentBalance: account.currentBalance +
               (txn.type == 'credit' ? txn.amount : -txn.amount),
         );
+      }
+
+      // Calculate total balance: initial balance + net from transactions
+      if (hasInitialBalance) {
+        totalBalance = initialBalance + netFromTransactions;
+      } else {
+        totalBalance = netFromTransactions;
       }
 
       // Convert to list and add consolidated ALL account
@@ -277,14 +289,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           .map((b) {
         return b.withSpent(categorySpent[b.category] ?? 0);
       }).toList();
-
-      // Restore total balance from persistent storage
-      double persistentBalance = await _getConsistentTotalBalance();
-      if (persistentBalance != 0) {
-        totalBalance = persistentBalance;
-      } else {
-        await _saveTotalBalance(totalBalance);
-      }
 
       setState(() {
         _recentTransactions = transactions.take(5).toList();
@@ -604,6 +608,27 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             ],
           ),
         ),
+        GestureDetector(
+          onTap: () async {
+            final result = await _smsHistoryService.forceScanSms(useAI: true);
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Scanned: $result new SMS found'),
+                  duration: const Duration(seconds: 2),
+                ),
+              );
+            }
+          },
+          child: Container(
+            padding: const EdgeInsets.all(10),
+            decoration:
+                AppTheme.glassDecoration(opacity: 0.06, borderRadius: 12),
+            child:
+                const Icon(Icons.sync, color: AppTheme.textSecondary, size: 22),
+          ),
+        ),
+        const SizedBox(width: 8),
         _buildIconButton(Icons.notifications_outlined, () {}),
         const SizedBox(width: 8),
         _buildIconButton(Icons.settings_outlined, () {
@@ -757,7 +782,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           const SizedBox(height: 12),
           // Current Bank Balance (Total Net Worth)
           Text(
-            'QAR${_activeAccount.currentBalance.toStringAsFixed(2)}',
+            'QAR${_totalBalance.toStringAsFixed(2)}',
             style: TextStyle(
               color: Colors.white,
               fontSize: MediaQuery.of(context).size.width < 360 ? 32 : 38,
@@ -766,7 +791,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             ),
           ),
           const SizedBox(height: 6),
-          Text('Monthly Income',
+          Text('Current Balance',
               style: TextStyle(
                 color: Colors.white.withOpacity(0.8),
                 fontSize: 14,

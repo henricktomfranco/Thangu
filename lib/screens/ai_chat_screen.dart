@@ -182,7 +182,18 @@ User's message: "$text"
       final lowerText = text.toLowerCase();
       String response;
 
-      if (lowerText.contains('saving') ||
+      // First try natural language query (offline, fast)
+      final nlResponse = _handleNaturalLanguageQuery(
+        text,
+        transactions,
+        goals,
+        monthlyIncome,
+        monthlyExpenses,
+      );
+
+      if (nlResponse != null) {
+        response = nlResponse;
+      } else if (lowerText.contains('saving') ||
           lowerText.contains('budget') ||
           lowerText.contains('plan')) {
         final userGoals = goals.map((g) => g.name).toList();
@@ -282,6 +293,125 @@ User's message: "$text"
         .map((g) =>
             '- ${g.name}: QAR ${g.currentAmount.toStringAsFixed(0)} / QAR ${g.targetAmount.toStringAsFixed(0)} (${(g.progressPercentage * 100).toInt()}%)')
         .join('\n');
+  }
+
+  String? _handleNaturalLanguageQuery(
+      String text,
+      List<Transaction> transactions,
+      List<SavingsGoal> goals,
+      double monthlyIncome,
+      double monthlyExpenses) {
+    final lower = text.toLowerCase();
+
+    // Get this month's transactions
+    final now = DateTime.now();
+    final startOfMonth = DateTime(now.year, now.month, 1);
+    final thisMonthTxns =
+        transactions.where((t) => t.date.isAfter(startOfMonth)).toList();
+
+    // Category spending this month
+    Map<String, double> categorySpending = {};
+    for (final txn in thisMonthTxns.where((t) => t.type == 'debit')) {
+      categorySpending.update(txn.category, (v) => v + txn.amount,
+          ifAbsent: () => txn.amount);
+    }
+
+    // "How much did I spend on [category]?"
+    final spendOnMatch = RegExp(
+            r'(?:how much (?:did i )?spend(?:ing)? (?:on|in) ?(.+?)(?:\?|$)',
+            caseSensitive: false)
+        .firstMatch(text);
+    if (spendOnMatch != null) {
+      final category = spendOnMatch.group(1)!.trim();
+      final matchedCat = categorySpending.keys.firstWhere(
+        (k) => k.toLowerCase().contains(category.toLowerCase()),
+        orElse: () => '',
+      );
+      if (matchedCat.isNotEmpty) {
+        final amount = categorySpending[matchedCat]!;
+        return "You spent **QAR ${amount.toStringAsFixed(2)}** on $matchedCat this month.";
+      }
+      return "No spending found for '$category' this month.";
+    }
+
+    // "What's my savings rate?" or "savings rate"
+    if (lower.contains('savings rate') || lower.contains('save rate')) {
+      final rate = monthlyIncome > 0
+          ? ((monthlyIncome - monthlyExpenses) / monthlyIncome * 100)
+          : 0;
+      return "Your savings rate is **${rate.toStringAsFixed(1)}%** this month.\n\n${rate >= 20 ? '🎉 Great job! That\'s a healthy savings rate.' : rate >= 10 ? '👍 Good start. Try to reach 20% for optimal savings.' : '💡 Consider reducing discretionary spending to improve your rate.'}";
+    }
+
+    // "How much left in budget?" or "budget status"
+    if (lower.contains('budget') &&
+        (lower.contains('left') ||
+            lower.contains('remaining') ||
+            lower.contains('status'))) {
+      final totalBudget = categorySpending.values.fold(0.0, (a, b) => a + b);
+      return "**Monthly Budget Status:**\n• Income: QAR ${monthlyIncome.toStringAsFixed(2)}\n• Spent: QAR ${totalBudget.toStringAsFixed(2)}\n• Remaining: QAR ${(monthlyIncome - totalBudget).toStringAsFixed(2)}";
+    }
+
+    // "Show me spending" or "my spending"
+    if ((lower.contains('show') && lower.contains('spending')) ||
+        lower == 'my spending' ||
+        lower == 'spending') {
+      if (categorySpending.isEmpty) return "No spending data this month yet.";
+      final sorted = categorySpending.entries.toList()
+        ..sort((a, b) => b.value.compareTo(a.value));
+      final total = categorySpending.values.fold(0.0, (a, b) => a + b);
+      String result =
+          "**Your Spending This Month:**\nTotal: QAR ${total.toStringAsFixed(2)}\n\n";
+      for (final cat in sorted.take(5)) {
+        final pct = (cat.value / total * 100).toStringAsFixed(1);
+        result += "• ${cat.key}: QAR ${cat.value.toStringAsFixed(2)} ($pct%)\n";
+      }
+      return result;
+    }
+
+    // "Top spending category" or "most spent"
+    if (lower.contains('top spending') ||
+        lower.contains('most spent') ||
+        lower.contains('biggest expense')) {
+      if (categorySpending.isEmpty) return "No spending data yet.";
+      final sorted = categorySpending.entries.toList()
+        ..sort((a, b) => b.value.compareTo(a.value));
+      final top = sorted.first;
+      return "Your biggest expense this month is **${top.key}** at **QAR ${top.value.toStringAsFixed(2)}**.";
+    }
+
+    // "How many transactions" or "transaction count"
+    if (lower.contains('how many') &&
+        (lower.contains('transaction') || lower.contains('txn'))) {
+      return "You have **${thisMonthTxns.length} transactions** this month.";
+    }
+
+    // "My goals" or "savings goals"
+    if (lower.contains('goal') &&
+        (lower.contains('my') ||
+            lower.contains('show') ||
+            lower.contains('list'))) {
+      if (goals.isEmpty)
+        return "You don't have any savings goals yet. Would you like to create one?";
+      return "**Your Savings Goals:**\n\n" +
+          goals
+              .map((g) =>
+                  "• ${g.name}: QAR ${g.currentAmount.toStringAsFixed(0)} / QAR ${g.targetAmount.toStringAsFixed(0)} (${(g.progressPercentage * 100).toInt()}% complete)")
+              .join('\n');
+    }
+
+    // "What's my balance" or "current balance"
+    if (lower.contains('balance') || lower.contains('net worth')) {
+      double totalBalance = 0;
+      for (final txn in transactions) {
+        if (txn.type == 'credit')
+          totalBalance += txn.amount;
+        else
+          totalBalance -= txn.amount;
+      }
+      return "Your current balance (from tracked transactions) is **QAR ${totalBalance.toStringAsFixed(2)}**.";
+    }
+
+    return null; // Not a natural language query - use AI
   }
 
   void _scrollToBottom() {
@@ -531,6 +661,16 @@ User's message: "$text"
               color: AppTheme.primaryLight,
               onTap: () {
                 _messageController.text = 'Give me savings tips';
+                _sendMessage();
+              },
+            ),
+            const SizedBox(width: 8),
+            _buildQuickActionChip(
+              icon: Icons.account_balance_wallet_rounded,
+              label: 'Balance',
+              color: AppTheme.accent,
+              onTap: () {
+                _messageController.text = "What's my balance?";
                 _sendMessage();
               },
             ),

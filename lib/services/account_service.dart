@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:thangu/models/transaction.dart';
 import 'package:thangu/services/database_service.dart';
 
@@ -17,6 +18,29 @@ class AccountService {
     'ACCT',
     'ACCOUNT'
   ];
+
+  AccountService() {
+    _loadAccounts();
+  }
+
+  // Issue 36: Load accounts from SharedPreferences
+  Future<void> _loadAccounts() async {
+    final prefs = await SharedPreferences.getInstance();
+    final keys = prefs.getKeys();
+    for (String key in keys) {
+      if (key.startsWith('account_name_')) {
+        final number = key.replaceFirst('account_name_', '');
+        final name = prefs.getString(key) ?? _generateAccountName(number);
+        _accounts[number] = Account(number: number, name: name);
+      }
+    }
+  }
+
+  // Save account to SharedPreferences
+  Future<void> _saveAccount(Account account) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('account_name_${account.number}', account.name);
+  }
 
   /// Extract account information from SMS message
   /// Returns last 4 digits if found, otherwise null
@@ -37,6 +61,10 @@ class AccountService {
     if (number != null) {
       // Check if this account is already registered
       accountName = _accounts[number]?.name ?? _generateAccountName(number);
+      // Auto-register so it gets saved if new
+      if (!_accounts.containsKey(number)) {
+        registerAccount(number);
+      }
     }
 
     return AccountInfo(
@@ -46,14 +74,16 @@ class AccountService {
     );
   }
 
-  /// Guess account type from SMS context
+  /// Guess account type from SMS context (Issue 37: Better account type detection)
   String _guessAccountType(String smsBody) {
     final lower = smsBody.toLowerCase();
 
-    if (lower.contains('debit')) return 'debit';
-    if (lower.contains('credit')) return 'credit';
-    if (lower.contains('savings')) return 'savings';
-    if (lower.contains('salary')) return 'salary';
+    // Look for explicit account types rather than just the word "debit" which could be a transaction type
+    if (lower.contains('credit card') || lower.contains('cc ') || lower.contains(' c/c')) return 'credit';
+    if (lower.contains('debit card') || lower.contains('atm card')) return 'debit';
+    if (lower.contains('saving') || lower.contains('savings a/c')) return 'savings';
+    if (lower.contains('salary') || lower.contains('payroll')) return 'salary';
+    if (lower.contains('current a/c') || lower.contains('checking')) return 'current';
     return 'unknown';
   }
 
@@ -66,10 +96,10 @@ class AccountService {
   void registerAccount(String accountNumber, {String? customName}) {
     if (accountNumber.length == 4) {
       // Expecting last 4 digits
-      _accounts[accountNumber] = Account(
-        number: accountNumber,
-        name: customName ?? _generateAccountName(accountNumber),
-      );
+      final name = customName ?? _generateAccountName(accountNumber);
+      final account = Account(number: accountNumber, name: name);
+      _accounts[accountNumber] = account;
+      _saveAccount(account);
     }
   }
 

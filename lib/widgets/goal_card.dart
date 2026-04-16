@@ -5,11 +5,13 @@ import '../models/goal.dart';
 class GoalCard extends StatelessWidget {
   final SavingsGoal goal;
   final VoidCallback onTap;
+  final VoidCallback? onAddMoney;
 
   const GoalCard({
     super.key,
     required this.goal,
     required this.onTap,
+    this.onAddMoney,
   });
 
   @override
@@ -116,27 +118,57 @@ class GoalCard extends StatelessWidget {
                     fontWeight: FontWeight.w500,
                   ),
                 ),
-                Row(
-                  children: [
-                    Icon(
-                      daysLeft > 0
-                          ? Icons.schedule_rounded
-                          : Icons.check_circle_rounded,
-                      size: 14,
-                      color: AppTheme.textTertiary,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      daysLeft > 0 ? '$daysLeft days left' : 'Deadline passed',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: daysLeft > 0
-                            ? AppTheme.textTertiary
-                            : AppTheme.accentRed,
+                if (onAddMoney != null)
+                  GestureDetector(
+                    onTap: onAddMoney,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primary.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.add,
+                              size: 14, color: AppTheme.primaryLight),
+                          SizedBox(width: 4),
+                          Text('Add',
+                              style: TextStyle(
+                                  fontSize: 12, color: AppTheme.primaryLight)),
+                        ],
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                if (onAddMoney == null)
+                  Row(
+                    children: [
+                      Icon(
+                        daysLeft > 0
+                            ? Icons.schedule_rounded
+                            : Icons.check_circle_rounded,
+                        size: 14,
+                        color: AppTheme.textTertiary,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        goal.isOverdue 
+                            ? 'Overdue' 
+                            : daysLeft > 0
+                                ? '$daysLeft days left'
+                                : 'Deadline passed',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: goal.isOverdue 
+                              ? AppTheme.accentRed 
+                              : daysLeft > 0
+                                  ? AppTheme.textTertiary
+                                  : AppTheme.accentRed,
+                        ),
+                      ),
+                    ],
+                  ),
               ],
             ),
           ],

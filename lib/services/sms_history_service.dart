@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:thangu/models/transaction.dart';
 import 'package:thangu/services/database_service.dart';
 import 'package:thangu/services/ai_service.dart';
@@ -23,8 +24,11 @@ class SmsHistoryService {
 
   /// Start all background tasks
   void startBackgroundScanning() {
+    // Immediate scan when started
+    scanNewSms(useAI: true);
+
     _scanTimer?.cancel();
-    _scanTimer = Timer.periodic(const Duration(minutes: 15), (_) {
+    _scanTimer = Timer.periodic(const Duration(minutes: 5), (_) {
       scanNewSms(useAI: true);
     });
 
@@ -43,6 +47,12 @@ class SmsHistoryService {
     _categorizeTimer = null;
   }
 
+  /// Force scan for new SMS immediately
+  Future<int> forceScanSms({bool useAI = true}) async {
+    print('[SmsHistory] Force scanning for new SMS...');
+    return await scanNewSms(useAI: useAI);
+  }
+
   /// Check and send budget alerts after a transaction is saved
   Future<void> _checkBudgetAlerts(String category) async {
     try {
@@ -51,7 +61,6 @@ class SmsHistoryService {
 
       for (final budget in budgets) {
         if (budget.category == category && budget.enabled) {
-          // Get updated spent amount
           final txns = await _dbService.getTransactions();
           final categorySpent = txns
               .where((t) => t.category == category && t.type != 'credit')
@@ -63,6 +72,28 @@ class SmsHistoryService {
       }
     } catch (e) {
       print('[SmsHistory] Error checking budget alerts: $e');
+    }
+  }
+
+  /// Check if a transaction exceeds the user's alert threshold
+  Future<void> _checkTransactionAlert(Transaction txn) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final threshold = prefs.getDouble('transaction_alert_threshold') ?? 100.0;
+      final notificationsEnabled = prefs.getBool('notifications_enabled') ?? true;
+
+      if (!notificationsEnabled) return;
+      if (txn.type == 'debit' && txn.amount >= threshold) {
+        final notifService = NotificationService();
+        await notifService.showTransactionAlert(
+          title: 'Large Transaction Detected',
+          body:
+              'QAR${txn.amount.toStringAsFixed(0)} at ${txn.description} — exceeds alert threshold',
+          txnId: txn.id,
+        );
+      }
+    } catch (e) {
+      print('[SmsHistory] Error checking transaction alert: $e');
     }
   }
 
@@ -101,31 +132,27 @@ class SmsHistoryService {
   /// Scan for new SMS messages only (since last scan)
   Future<int> scanNewSms({bool useAI = true}) async {
     try {
-      // Get last transaction date
-      final existingTxn = await _dbService.getTransactions(
-          limit: 10, startDate: DateTime.now().subtract(Duration(days: 7)));
-      DateTime? lastScanTime;
-      if (existingTxn.isNotEmpty) {
-        lastScanTime = existingTxn
-            .map((t) => t.date)
-            .reduce((a, b) => a.isAfter(b) ? a : b);
-      }
+      final prefs = await SharedPreferences.getInstance();
 
-      // Calculate how many days to scan based on last scan time
-      int daysToScan = 7; // Default to last 7 days
-      if (lastScanTime != null) {
-        final diff = DateTime.now().difference(lastScanTime).inDays;
-        daysToScan = diff > 0 ? diff : 1; // At least scan 1 day
-      }
+      // Issue 2: Use stored last_scan_timestamp rather than last DB transaction date
+      final lastScanMs = prefs.getInt('last_sms_scan_timestamp');
+      int daysToScan;
 
-      if (daysToScan > 7) {
-        daysToScan = 7; // Limit to last 7 days for performance
-        print(
-            '[SmsHistory] Limiting scan to $daysToScan days to prevent excessive loading');
+      if (lastScanMs != null) {
+        final lastScan = DateTime.fromMillisecondsSinceEpoch(lastScanMs);
+        final diff = DateTime.now().difference(lastScan).inDays;
+        daysToScan = (diff + 1).clamp(1, 3); // min 1 day, max 3 days
+      } else {
+        daysToScan = 2;
       }
 
       print('[SmsHistory] Scanning last $daysToScan days of SMS messages');
       final count = await loadHistoricalSms(lastDays: daysToScan, useAI: useAI);
+
+      // Save scan timestamp
+      await prefs.setInt(
+          'last_sms_scan_timestamp', DateTime.now().millisecondsSinceEpoch);
+
       return count;
     } catch (e) {
       print('[SmsHistory] Error scanning new SMS: $e');
@@ -133,11 +160,11 @@ class SmsHistoryService {
     }
   }
 
-  /// Check if an SMS is a potential financial transaction
-  Future<bool> _isFinancialSms(String body) async {
+  /// Check if an SMS is a potential financial transaction (Issue 4: now sync)
+  bool _isFinancialSms(String body) {
     final lowerBody = body.toLowerCase();
 
-    // Skip OTP/authentication SMS - these are NOT transactions
+    // Issue 3: OTP/authentication SMS must be excluded FIRST before any other checks
     if (lowerBody.contains('otp') ||
         lowerBody.contains('authentication') ||
         lowerBody.contains('login') ||
@@ -146,18 +173,18 @@ class SmsHistoryService {
         lowerBody.contains('كلمة سر') ||
         lowerBody.contains('تأكيد') ||
         lowerBody.contains('verification') ||
-        lowerBody.contains('كود')) {
+        lowerBody.contains('كود') ||
+        lowerBody.contains('one time') ||
+        lowerBody.contains('do not share')) {
       return false;
     }
 
-    // Broad amount detection - if it has any amount, likely a transaction
-    // Patterns: "QR 50", "50 QAR", "QAR 100.00", "100.00 QR", "ريال ٥٠"
-    final amountPattern = RegExp(r'(qr\s?\d+|qar\s?\d+|\d+\s?qr|rial|ريال)',
+    // Issue 3: expanded QAR regex to catch "QR. 50" and "QR 50" patterns used by Qatari banks
+    final amountPattern = RegExp(
+        r'(qr\.?\s*\d+|qar\s*\d+|\d+\s*qr|\d+\s*qar|rial|ريال\s*[\d٠-٩]+)',
         caseSensitive: false);
 
-    if (amountPattern.hasMatch(body)) {
-      return true;
-    }
+    if (amountPattern.hasMatch(body)) return true;
 
     // Common transaction keywords
     final transactionKeywords = [
@@ -205,14 +232,10 @@ class SmsHistoryService {
       if (lowerBody.contains(pattern)) return true;
     }
 
-    // If none of the patterns match, it's likely not a financial SMS
     return false;
   }
 
   /// Load historical SMS messages and save to database
-  /// [lastDays] can be int (number of days) or Duration
-  /// [useAI] - whether to use AI for categorization (skip on first load for speed)
-  /// [isFirstLoad] - if true, skip duplicate check for faster initial load
   Future<int> loadHistoricalSms({
     dynamic lastDays,
     bool overwrite = false,
@@ -220,15 +243,13 @@ class SmsHistoryService {
     bool isFirstLoad = false,
   }) async {
     try {
-      // Initialize AI service only if using AI
       if (useAI) {
         await _aiService.initialize();
       }
       print(
           '[SmsHistory] Starting to load historical SMS (first load: $isFirstLoad)...');
 
-      // Convert to days if Duration
-      int limitDays = 90; // default
+      int limitDays = 90;
       if (lastDays is Duration) {
         limitDays = lastDays.inDays;
       } else if (lastDays is int) {
@@ -237,23 +258,22 @@ class SmsHistoryService {
 
       print('[SmsHistory] Requesting SMS from last $limitDays days');
 
-      // Request to load SMS from native side
+      // Issue 5: longer timeout on first load (90 days of SMS can be large)
+      final timeoutSeconds = isFirstLoad ? 30 : 10;
+
       final result = await _channel.invokeMethod('loadHistoricalSms', {
         'limitDays': limitDays,
       }).timeout(
-        const Duration(seconds: 10),
+        Duration(seconds: timeoutSeconds),
         onTimeout: () {
-          print('[SmsHistory] Method channel timeout after 10 seconds');
+          print(
+              '[SmsHistory] Method channel timeout after ${timeoutSeconds}s');
           return null;
         },
       );
 
       if (result == null) {
         print('[SmsHistory] No SMS data received from platform (null result)');
-        print('[SmsHistory] This may indicate:');
-        print('[SmsHistory]   - SMS permissions not granted');
-        print('[SmsHistory]   - No SMS messages in device history');
-        print('[SmsHistory]   - Platform method not implemented');
         return 0;
       }
 
@@ -261,65 +281,62 @@ class SmsHistoryService {
       print(
           '[SmsHistory] Received ${smsList.length} SMS messages from platform');
 
-      if (smsList.isEmpty) {
-        print('[SmsHistory] No SMS messages found in the last $limitDays days');
-        return 0;
-      }
+      if (smsList.isEmpty) return 0;
 
       int savedCount = 0;
 
-      for (final smsData in smsList) {
+      // Fetch existing transactions once for dedup (instead of per-SMS)
+      final existingTxn = isFirstLoad
+          ? <Transaction>[]
+          : await _dbService.getTransactions(limit: 500);
+
+      for (int i = 0; i < smsList.length; i++) {
+        final smsData = smsList[i];
         try {
           final message = smsData as Map<dynamic, dynamic>;
           final body = message['body'] as String? ?? '';
           final sender = message['sender'] as String? ?? 'Unknown';
           final timestamp = message['timestamp'] as int? ?? 0;
 
-          if (body.isEmpty) {
-            print('[SmsHistory] Skipping SMS with empty body from $sender');
-            continue;
-          }
+          if (body.isEmpty) continue;
 
-          // Use AI to determine if this is a financial transaction
-          final isFinancial = await _isFinancialSms(body);
+          // Issue 4: sync call now (no await needed)
+          final isFinancial = _isFinancialSms(body);
           if (!isFinancial) {
             print(
                 '[SmsHistory] ⊘ Skipped non-financial SMS from $sender: ${body.substring(0, min(body.length, 40))}...');
             continue;
           }
 
-          // Check if already exists in database (only on subsequent scans, not first load)
+          // Issue 1: improved duplicate check — use timestamp + sender, not body content
           if (!isFirstLoad) {
-            final existingTxn = await _dbService.getTransactions();
+            final smsDate = DateTime.fromMillisecondsSinceEpoch(timestamp);
             final isDuplicate = existingTxn.any(
               (t) =>
-                  t.description
-                      .contains(body.substring(0, min(body.length, 30))) &&
-                  t.sender == sender,
+                  t.sender == _sanitizeSender(sender) &&
+                  t.date.difference(smsDate).abs() < const Duration(minutes: 2),
             );
 
             if (isDuplicate && !overwrite) {
-              print(
-                  '[SmsHistory] Duplicate SMS skipped: ${body.substring(0, 30)}...');
+              print('[SmsHistory] Duplicate SMS skipped (timestamp+sender match)');
               continue;
             }
           }
 
           // Parse SMS content
-          final transaction = _parseSms(body, sender, timestamp);
+          // Issue 6: append loop index to prevent ID collision in same millisecond
+          final transaction = _parseSms(body, sender, timestamp, index: i);
 
-          // Try AI categorization (optional)
           if (useAI) {
             await _categorizeTransaction(transaction);
           }
 
-          // Save to database
           await _dbService.insertTransaction(transaction);
           savedCount++;
 
-          // Check budget alerts after saving (skip on first load for speed)
           if (!isFirstLoad) {
             await _checkBudgetAlerts(transaction.category);
+            await _checkTransactionAlert(transaction);
           }
 
           print(
@@ -336,7 +353,6 @@ class SmsHistoryService {
     } on PlatformException catch (e) {
       print('[SmsHistory] ✗ Platform error: ${e.code}');
       print('[SmsHistory]   Message: ${e.message}');
-      print('[SmsHistory]   Details: ${e.details}');
       return 0;
     } catch (e) {
       print('[SmsHistory] ✗ Unexpected error: $e');
@@ -345,31 +361,28 @@ class SmsHistoryService {
   }
 
   /// Parse SMS content into Transaction object
-  /// Now uses AI to better understand merchant, category, and account info
-  Transaction _parseSms(String body, String sender, int timestamp) {
+  Transaction _parseSms(String body, String sender, int timestamp,
+      {int index = 0}) {
     final date = DateTime.fromMillisecondsSinceEpoch(timestamp);
 
-    // Extract base transaction
+    // Issue 6: include index to avoid ID collisions when multiple SMS arrive same ms
     final transaction = Transaction(
-      id: DateTime.now().millisecondsSinceEpoch.toString() + '_hist',
+      id: '${timestamp}_${index}_hist',
       amount: _extractAmount(body),
       type: _extractType(body),
-      category: 'Pending', // Will be updated by AI
-      description: _extractMerchantName(body), // Clean merchant name
+      category: 'Pending',
+      description: _extractMerchantName(body),
       date: date,
       sender: _sanitizeSender(sender),
       isCategorizedByAI: false,
       aiConfidence: 0.0,
     );
 
-    // Attach account information
     return _accountService.attachAccountInfo(transaction, body);
   }
 
   /// Extract clean merchant name from SMS
-  /// E.g., "MCDONALDS OLD AIRPOR" from full transaction SMS
   String _extractMerchantName(String smsBody) {
-    // Common patterns in SMS to extract merchant name
     final patterns = [
       RegExp(r'at\s+([A-Z\s\d]+?)(?:\sat\s|Balance:|Enquiry|$)',
           multiLine: true),
@@ -383,21 +396,17 @@ class SmsHistoryService {
       if (match != null && match.groupCount > 0) {
         String merchant = match.group(1)?.trim() ?? '';
         if (merchant.isNotEmpty && merchant.length > 3) {
-          // Clean up common suffixes
           merchant = merchant
               .replaceAll(RegExp(r'\s+at\s*$'), '')
               .replaceAll(RegExp(r'\s+Balance.*$'), '')
               .trim();
-          if (merchant.isNotEmpty) {
-            return merchant;
-          }
+          if (merchant.isNotEmpty) return merchant;
         }
       }
     }
 
-    // Fallback: use first 50 chars, redacted
     String cleaned = smsBody.replaceAll(
-      RegExp(r'(OTP|PIN|CVV|ATM)[:\s]+[\w\d]+', caseSensitive: false),
+      RegExp(r'(OTP|PIN|CVV|ATM)[\:\s]+[\w\d]+', caseSensitive: false),
       '[REDACTED]',
     );
     if (cleaned.length > 50) {
@@ -406,13 +415,12 @@ class SmsHistoryService {
     return cleaned.isEmpty ? 'Transaction' : cleaned;
   }
 
-  /// Extract amount from SMS - supports multiple currency formats
+  /// Extract amount from SMS — unified to support all currencies
   double _extractAmount(String smsBody) {
     try {
-      // Try to extract amount with currency prefix/suffix
-      // Supports: Rs./₹/INR, QAR, AED, SAR, USD, EUR, GBP, etc.
+      // Issue 3: expanded to cover QR. format and Arabic digits
       final RegExp regExp = RegExp(
-        r'(?:Rs\.?|INR|₹|QAR|AED|SAR|USD|\$|EUR|€|GBP|£)\s*([0-9,]+\.?[0-9]*)',
+        r'(?:Rs\.?|INR|₹|QAR|QR\.?|AED|SAR|USD|\$|EUR|€|GBP|£)\s*([0-9,]+\.?[0-9]*)',
         caseSensitive: false,
       );
       final Match? match = regExp.firstMatch(smsBody);
@@ -422,17 +430,13 @@ class SmsHistoryService {
         return double.parse(amountStr);
       }
 
-      // Fallback: look for amount pattern alone (number followed by optional decimals)
       final RegExp fallbackRegExp = RegExp(r'([0-9]{2,}(?:\.[0-9]{2})?)\b');
       final Match? fallbackMatch = fallbackRegExp.firstMatch(smsBody);
       if (fallbackMatch != null) {
         String amountStr = fallbackMatch.group(1) ?? '0';
         amountStr = amountStr.replaceAll(',', '');
         final amount = double.parse(amountStr);
-        // Only accept if amount is reasonable (between 0.1 and 1,000,000)
-        if (amount > 0.1 && amount < 1000000) {
-          return amount;
-        }
+        if (amount > 0.1 && amount < 1000000) return amount;
       }
     } catch (e) {
       print('[SmsHistory] Error extracting amount: $e');
@@ -444,7 +448,6 @@ class SmsHistoryService {
   String _extractType(String smsBody) {
     final lowerBody = smsBody.toLowerCase();
 
-    // Check for credit/income indicators
     if (lowerBody.contains('credit') ||
         lowerBody.contains('deposited') ||
         lowerBody.contains('received') ||
@@ -454,7 +457,6 @@ class SmsHistoryService {
       return 'credit';
     }
 
-    // Check for debit/expense indicators
     if (lowerBody.contains('debit') ||
         lowerBody.contains('was used for') ||
         lowerBody.contains('spent') ||
@@ -465,21 +467,7 @@ class SmsHistoryService {
       return 'debit';
     }
 
-    // Default to debit if uncertain
     return 'debit';
-  }
-
-  /// Extract description
-  String _extractDescription(String smsBody) {
-    String cleaned = smsBody.replaceAll(
-      RegExp(r'(OTP|PIN|CVV|ATM)[:\s]+[\w\d]+', caseSensitive: false),
-      '[REDACTED]',
-    );
-
-    if (cleaned.length > 100) {
-      return cleaned.substring(0, 100) + '...';
-    }
-    return cleaned;
   }
 
   /// Sanitize sender
@@ -487,10 +475,9 @@ class SmsHistoryService {
     return sender.replaceAll(RegExp(r'[^\w\s]'), '').trim();
   }
 
-  /// Categorize transaction with AI - now with smart detection
+  /// Categorize transaction with AI
   Future<void> _categorizeTransaction(Transaction transaction) async {
     try {
-      // First try AI if available
       String? aiCategory = await _aiService.categorizeTransaction(transaction);
 
       if (aiCategory != null && aiCategory.isNotEmpty) {
@@ -504,7 +491,6 @@ class SmsHistoryService {
       print('[SmsHistory] AI categorization tried but failed: $e');
     }
 
-    // Fallback to smart keyword matching
     transaction.category = _getSmartCategory(transaction);
     transaction.isCategorizedByAI = false;
     transaction.aiConfidence = 0.0;
@@ -513,9 +499,7 @@ class SmsHistoryService {
   /// Smart category detection using expanded keywords
   String _getSmartCategory(Transaction transaction) {
     final desc = transaction.description.toLowerCase();
-    final fullBody = transaction.description.toLowerCase();
 
-    // Food & Dining
     if (desc.contains('food') ||
         desc.contains('restaurant') ||
         desc.contains('mcdonalds') ||
@@ -523,13 +507,10 @@ class SmsHistoryService {
         desc.contains('coffee') ||
         desc.contains('pizza') ||
         desc.contains('burger') ||
-        desc.contains('dining') ||
-        desc.contains('hotel') ||
-        desc.contains('bar')) {
+        desc.contains('dining')) {
       return 'Food & Dining';
     }
 
-    // Groceries
     if (desc.contains('grocery') ||
         desc.contains('supermarket') ||
         desc.contains('market') ||
@@ -539,7 +520,6 @@ class SmsHistoryService {
       return 'Groceries';
     }
 
-    // Transportation
     if (desc.contains('fuel') ||
         desc.contains('petrol') ||
         desc.contains('gas') ||
@@ -548,12 +528,10 @@ class SmsHistoryService {
         desc.contains('transport') ||
         desc.contains('airline') ||
         desc.contains('bus') ||
-        desc.contains('train') ||
-        desc.contains('station')) {
+        desc.contains('train')) {
       return 'Transportation';
     }
 
-    // Shopping
     if (desc.contains('shop') ||
         desc.contains('store') ||
         desc.contains('mall') ||
@@ -563,7 +541,6 @@ class SmsHistoryService {
       return 'Shopping';
     }
 
-    // Healthcare
     if (desc.contains('hospital') ||
         desc.contains('medical') ||
         desc.contains('pharmacy') ||
@@ -573,7 +550,6 @@ class SmsHistoryService {
       return 'Healthcare';
     }
 
-    // Bills & Utilities
     if (desc.contains('bill') ||
         desc.contains('utility') ||
         desc.contains('electric') ||
@@ -584,7 +560,6 @@ class SmsHistoryService {
       return 'Bills & Utilities';
     }
 
-    // Entertainment
     if (desc.contains('movie') ||
         desc.contains('cinema') ||
         desc.contains('game') ||
@@ -594,7 +569,6 @@ class SmsHistoryService {
       return 'Entertainment';
     }
 
-    // Education
     if (desc.contains('school') ||
         desc.contains('university') ||
         desc.contains('college') ||
@@ -604,7 +578,6 @@ class SmsHistoryService {
       return 'Education';
     }
 
-    // Travel
     if (desc.contains('hotel') ||
         desc.contains('resort') ||
         desc.contains('travel') ||
@@ -614,7 +587,6 @@ class SmsHistoryService {
       return 'Travel';
     }
 
-    // Investment
     if (desc.contains('invest') ||
         desc.contains('trading') ||
         desc.contains('stock') ||
@@ -624,7 +596,6 @@ class SmsHistoryService {
       return 'Investment';
     }
 
-    // Transfer
     if (desc.contains('transfer') ||
         desc.contains('sent') ||
         desc.contains('payment') ||
@@ -632,10 +603,7 @@ class SmsHistoryService {
       return 'Transfer';
     }
 
-    // Income/Credit
-    if (transaction.type == 'credit') {
-      return 'Income';
-    }
+    if (transaction.type == 'credit') return 'Income';
 
     return 'Other';
   }

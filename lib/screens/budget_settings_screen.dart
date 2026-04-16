@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../app_theme.dart';
 import '../services/database_service.dart';
 import '../models/budget.dart';
+import '../services/ai_service.dart';
 
 class BudgetSettingsScreen extends StatefulWidget {
   const BudgetSettingsScreen({super.key});
@@ -32,7 +33,11 @@ class _BudgetSettingsScreenState extends State<BudgetSettingsScreen> {
   Future<void> _loadBudgets() async {
     setState(() => _isLoading = true);
     try {
-      final budgets = await _dbService.getBudgets();
+      final now = DateTime.now();
+      final periodStart = DateTime(now.year, now.month, 1);
+      final periodEnd = DateTime(now.year, now.month + 1, 0);
+      final budgets = await _dbService.getBudgets(
+          startDate: periodStart, endDate: periodEnd);
       setState(() {
         _budgets = budgets;
         _isLoading = false;
@@ -309,6 +314,161 @@ class _BudgetSettingsScreenState extends State<BudgetSettingsScreen> {
     );
   }
 
+  Future<void> _showAIRecommendations() async {
+    setState(() => _isLoading = true);
+
+    try {
+      // Get monthly income from transactions
+      final transactions = await _dbService.getTransactions(limit: 100);
+      double monthlyIncome = 0;
+      final now = DateTime.now();
+      final threeMonthsAgo = DateTime(now.year, now.month - 3, 1);
+
+      for (final txn in transactions
+          .where((t) => t.date.isAfter(threeMonthsAgo) && t.type == 'credit')) {
+        monthlyIncome += txn.amount;
+      }
+      monthlyIncome = monthlyIncome / 3;
+
+      if (monthlyIncome <= 0) {
+        setState(() => _isLoading = false);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content:
+                    Text('Add income transactions to get AI recommendations.')),
+          );
+        }
+        return;
+      }
+
+      final aiService = AiService();
+      final recommendations = await aiService.getBudgetRecommendations(
+        monthlyIncome: monthlyIncome,
+        transactions: transactions,
+        existingBudgets: _budgets,
+      );
+
+      setState(() => _isLoading = false);
+
+      if (mounted) {
+        showModalBottomSheet(
+          context: context,
+          backgroundColor: AppTheme.surfaceCard,
+          isScrollControlled: true,
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          builder: (context) => DraggableScrollableSheet(
+            initialChildSize: 0.7,
+            maxChildSize: 0.9,
+            minChildSize: 0.5,
+            expand: false,
+            builder: (context, scrollController) => Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.auto_awesome,
+                          color: AppTheme.accentOrange),
+                      const SizedBox(width: 8),
+                      const Text('AI Budget Recommendations',
+                          style: TextStyle(
+                              fontSize: 18, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1),
+                Expanded(
+                  child: ListView.builder(
+                    controller: scrollController,
+                    padding: const EdgeInsets.all(16),
+                    itemCount: recommendations.length,
+                    itemBuilder: (context, index) {
+                      final rec = recommendations[index];
+                      final category = rec['category'] as String;
+                      final suggested = rec['suggestedLimit'] as double;
+                      final existing = rec['existingLimit'] as double;
+
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: AppTheme.surface,
+                          borderRadius: BorderRadius.circular(12),
+                          border:
+                              Border.all(color: Colors.white.withOpacity(0.06)),
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(category,
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.w600)),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                      'Current: QAR${existing.toStringAsFixed(0)}',
+                                      style: AppTheme.caption),
+                                ],
+                              ),
+                            ),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Text('QAR${suggested.toStringAsFixed(0)}',
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        color: AppTheme.primaryLight)),
+                                const SizedBox(height: 4),
+                                TextButton(
+                                  onPressed: () async {
+                                    // Create budget with suggested amount
+                                    final budget = Budget(
+                                      id: DateTime.now()
+                                          .millisecondsSinceEpoch
+                                          .toString(),
+                                      category: category,
+                                      limit: suggested,
+                                      periodStart:
+                                          DateTime(now.year, now.month, 1),
+                                      periodEnd:
+                                          DateTime(now.year, now.month + 1, 0),
+                                      createdAt: now,
+                                    );
+                                    await _dbService.insertBudget(budget);
+                                    if (mounted) Navigator.pop(context);
+                                    _loadBudgets();
+                                  },
+                                  child: const Text('Apply',
+                                      style: TextStyle(fontSize: 12)),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      setState(() => _isLoading = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error getting recommendations: $e')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final hasBudgets = _budgets.isNotEmpty;
@@ -328,6 +488,15 @@ class _BudgetSettingsScreenState extends State<BudgetSettingsScreen> {
               color: AppTheme.textPrimary,
               fontWeight: FontWeight.bold,
             )),
+        actions: [
+          TextButton.icon(
+            onPressed: _showAIRecommendations,
+            icon: const Icon(Icons.auto_awesome,
+                size: 18, color: AppTheme.accentOrange),
+            label: const Text('AI Recommend',
+                style: TextStyle(color: AppTheme.accentOrange, fontSize: 13)),
+          ),
+        ],
       ),
       body: _isLoading
           ? const Center(
