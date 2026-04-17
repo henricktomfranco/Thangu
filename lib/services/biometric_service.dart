@@ -23,10 +23,6 @@ class BiometricService {
     try {
       final bool didAuthenticate = await _auth.authenticate(
         localizedReason: 'Please authenticate to access your financial data',
-        options: const AuthenticationOptions(
-          stickyAuth: true,
-          biometricOnly: false,
-        ),
       );
       return didAuthenticate;
     } on PlatformException {
