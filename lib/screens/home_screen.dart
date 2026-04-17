@@ -166,6 +166,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       // Get ALL transactions (filter by account if selected)
       final transactions = await _dbService.getTransactions(
           startDate: DateTime.now().subtract(Duration(days: 365 * 10)));
+          
+      // Check for month rollover auto-savings
+      await _checkAndApplyRollover(transactions);
       final goals = await _dbService.getGoals();
 
       // Calculate current month stats and account summaries
@@ -308,6 +311,64 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     } catch (e) {
       setState(() => _isLoading = false);
       _fadeController.forward();
+    }
+  }
+
+  /// Automatically divides end-of-month remaining balance across active goals
+  Future<void> _checkAndApplyRollover(List<app_txn.Transaction> transactions) async {
+    final prefs = await SharedPreferences.getInstance();
+    final now = DateTime.now();
+    final currentMonthKey = '${now.year}-${now.month.toString().padLeft(2, '0')}';
+    
+    // Default to current month so we don't trigger rollover on fresh installs
+    final lastRolloverMonth = prefs.getString('last_rollover_month') ?? currentMonthKey;
+    
+    if (lastRolloverMonth != currentMonthKey) {
+      // Month has changed. Process the rollover for lastRolloverMonth.
+      final parts = lastRolloverMonth.split('-');
+      final lastYear = int.parse(parts[0]);
+      final lastMonth = int.parse(parts[1]);
+      
+      final startOfLastMonth = DateTime(lastYear, lastMonth, 1);
+      final endOfLastMonth = DateTime(lastYear, lastMonth + 1, 0, 23, 59, 59);
+      
+      double lastMonthIncome = 0;
+      double lastMonthExpense = 0;
+      
+      for (final txn in transactions) {
+        if (txn.date.isAfter(startOfLastMonth) && txn.date.isBefore(endOfLastMonth)) {
+          if (txn.type == 'credit') {
+            lastMonthIncome += txn.amount;
+          } else {
+            lastMonthExpense += txn.amount;
+          }
+        }
+      }
+      
+      final savings = lastMonthIncome - lastMonthExpense;
+      
+      if (savings > 0) {
+        final goals = await _dbService.getGoals();
+        final activeGoals = goals.where((g) => !g.isAchieved).toList();
+        
+        if (activeGoals.isNotEmpty) {
+          final share = savings / activeGoals.length;
+          for (final goal in activeGoals) {
+            final updatedGoal = SavingsGoal(
+              id: goal.id,
+              name: goal.name,
+              targetAmount: goal.targetAmount,
+              currentAmount: goal.currentAmount + share,
+              targetDate: goal.targetDate,
+              category: goal.category,
+              icon: goal.icon,
+            );
+            await _dbService.updateGoal(updatedGoal);
+          }
+        }
+      }
+      
+      await prefs.setString('last_rollover_month', currentMonthKey);
     }
   }
 
@@ -694,23 +755,75 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     size: 18),
               ),
               const SizedBox(width: 10),
-              Text('Monthly Budget',
+              Text('Monthly Overview',
                   style: TextStyle(
                       color: Colors.white.withOpacity(0.9),
                       fontSize: 14,
                       fontWeight: FontWeight.w500)),
               const Spacer(),
-              Text(
-                '${savingsPercentage >= 0 ? '+' : ''}$savingsPercentage%',
-                style: TextStyle(
-                  color: remainingBudget >= 0 ? Colors.white : Colors.white,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    Text('Total: ', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                    Text(
+                      'QAR ${_totalBalance.toStringAsFixed(0)}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 20),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Income', style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 13)),
+                    const SizedBox(height: 4),
+                    Text('QAR ${_monthlyIncome.toStringAsFixed(0)}', 
+                      style: TextStyle(
+                        color: Colors.white, 
+                        fontSize: MediaQuery.of(context).size.width < 360 ? 24 : 28, 
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: -0.5,
+                      )),
+                  ]
+                )
+              ),
+              Container(width: 1, height: 40, color: Colors.white.withOpacity(0.2)),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Expenses', style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 13)),
+                    const SizedBox(height: 4),
+                    Text('QAR ${_spentAmount.toStringAsFixed(0)}', 
+                      style: TextStyle(
+                        color: Colors.white, 
+                        fontSize: MediaQuery.of(context).size.width < 360 ? 24 : 28, 
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: -0.5,
+                      )),
+                  ]
+                )
+              ),
+            ]
+          ),
+          const SizedBox(height: 20),
           // Account and date range selectors
           Row(
             children: [
@@ -779,23 +892,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          // Current Bank Balance (Total Net Worth)
-          Text(
-            'QAR${_totalBalance.toStringAsFixed(2)}',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: MediaQuery.of(context).size.width < 360 ? 32 : 38,
-              fontWeight: FontWeight.bold,
-              letterSpacing: -0.5,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text('Current Balance',
-              style: TextStyle(
-                color: Colors.white.withOpacity(0.8),
-                fontSize: 14,
-              )),
           const SizedBox(height: 20),
           // Monthly Budget Progress
           Row(

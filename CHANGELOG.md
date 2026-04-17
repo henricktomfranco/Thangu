@@ -1,5 +1,24 @@
 # Thangu Changelog
 
+## [1.0.4] - 2026-04-17
+### Added
+- **Biometric Authentication**: Fingerprint/Face recognition for app security
+- **App Locking**: Automatic re-lock when app goes to background
+- **Data Import**: File picker integration for importing JSON backups
+- **Smart Savings Automation**: End-of-month surplus automatic distribution to active savings goals
+- **Monthly Rollover Tracking**: Prevents duplicate processing across month boundaries
+- **Enhanced Dashboard**: Income and expenses displayed side-by-side
+- Dependencies: `local_auth` v3.0.1, `file_picker` v8.0.7
+
+### Changed
+- MainActivity.kt upgraded to FlutterFragmentActivity for better lifecycle management
+- Home screen layout reorganized for better financial overview
+- Settings screen with improved import/export interface
+
+### Security
+- Added biometric permissions to AndroidManifest.xml
+- Optional security toggle in settings for biometric protection
+
 ## [1.0.2] - 2026-04-11
 ### Added
 - **Bank Balance Display**: Shows actual total net worth (income - expenses)

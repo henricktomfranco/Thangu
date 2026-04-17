@@ -3,6 +3,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
+import 'package:file_picker/file_picker.dart';
+import 'dart:io';
 import 'package:thangu/services/export_service.dart';
 import 'package:thangu/services/proactive_ai_service.dart';
 import 'package:thangu/services/sms_history_service.dart';
@@ -222,38 +224,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _importData() async {
-    // Show file picker dialog or explanation
-    if (mounted) {
-      final result = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Import Data'),
-          content: const Text(
-              'To import data, place your backup JSON file in the app documents directory and restart the app.'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('I Understand'),
-            ),
-          ],
-        ),
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['json'],
       );
 
-      // In a real implementation, you would handle the actual file import here
-      // This is a simplified version for demonstration
-      if (result == true) {
+      if (result != null && result.files.single.path != null) {
+        final file = File(result.files.single.path!);
+        final jsonContent = await file.readAsString();
+        
+        setState(() => _isScanning = true); // reuse loading state
+        
+        await _exportService.importFromJson(jsonContent);
+        
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Import functionality would be implemented here'),
-              backgroundColor: AppTheme.primaryDark,
+              content: Text('Data imported successfully! Please restart app.'),
+              backgroundColor: AppTheme.accentGreen,
             ),
           );
         }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Import failed: $e'),
+            backgroundColor: AppTheme.accentRed,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isScanning = false);
       }
     }
   }

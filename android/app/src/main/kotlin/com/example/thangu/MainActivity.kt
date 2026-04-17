@@ -1,6 +1,6 @@
 package com.example.thangu
 
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import android.util.Log
@@ -11,7 +11,7 @@ import android.Manifest
 import androidx.core.app.ActivityCompat
 import java.util.Calendar
 
-class MainActivity : FlutterActivity() {
+class MainActivity : FlutterFragmentActivity() {
     private val CHANNEL = "com.example.thangu/sms"
     private val PERMISSIONS_CHANNEL = "com.example.thangu/permissions"
     private val TAG = "MainActivity"

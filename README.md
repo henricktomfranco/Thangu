@@ -62,6 +62,23 @@ An intelligent personal finance manager app built with Flutter and Dart that rea
 - No personal financial data leaves your phone
 - Secure SQLite database
 
+### 🔐 Biometric Security
+- Fingerprint/Face recognition authentication
+- App locks on background to protect sensitive data
+- Optional biometric protection toggle in settings
+- Works with all modern Android devices
+
+### 💾 Data Backup & Import
+- Export all financial data to JSON format
+- Share backups securely
+- Import previous backups with file picker
+- Complete data portability
+
+### 🎯 Smart Savings Automation
+- Automatic end-of-month surplus distribution
+- Divides remaining balance across active savings goals
+- Monthly rollover tracking to prevent duplicate processing
+
 ## Screenshots
 
  ![Dashboard](./assets/screenshots/dashboard.png)
@@ -123,7 +140,8 @@ lib/
     ├── ai_service.dart    # Ollama AI integration
     ├── database_service.dart # Local SQLite storage
     ├── notification_service.dart # Push notifications
-    └── export_service.dart  # Data export/import
+    ├── export_service.dart  # Data export/import
+    └── biometric_service.dart # Biometric authentication
 ```
 
 ## Database Tables
@@ -172,6 +190,7 @@ flutter build ios --release
 
 ## Version History
 
+- v1.0.4: Biometric security, data import/export, smart savings automation
 - v1.0.2: Investment & Debt tracking, category filter, export with share
 - v1.0.1: Budget system, bill reminders, notifications
 - v1.0.0: Initial release with AI categorization
