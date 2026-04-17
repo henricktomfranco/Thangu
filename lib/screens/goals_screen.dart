@@ -428,7 +428,8 @@ class _GoalFormState extends State<GoalForm> {
     double monthlyIncome = 0;
     final now = DateTime.now();
     for (final txn in transactions) {
-      if (txn.date.isAfter(DateTime(now.year, now.month - 3, 1)) &&
+      // Fixed: month - 3 underflow for Jan/Feb/Mar
+      if (txn.date.isAfter(now.subtract(const Duration(days: 90))) &&
           txn.type == 'credit') {
         monthlyIncome += txn.amount;
       }

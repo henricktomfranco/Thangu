@@ -32,7 +32,8 @@ class Debt {
   bool get isOnTrack => remainingBalance > 0;
 
   int get monthsRemaining {
-    if (monthlyPayment <= 0) return 0;
+    // Fixed: handle negative balance and ensure non-negative result
+    if (monthlyPayment <= 0 || remainingBalance <= 0) return 0;
     return (remainingBalance / monthlyPayment).ceil();
   }
 

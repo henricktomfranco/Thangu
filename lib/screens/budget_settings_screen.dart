@@ -35,7 +35,9 @@ class _BudgetSettingsScreenState extends State<BudgetSettingsScreen> {
     try {
       final now = DateTime.now();
       final periodStart = DateTime(now.year, now.month, 1);
-      final periodEnd = DateTime(now.year, now.month + 1, 0);
+      // Fixed: month + 1 overflow on December
+      final nextMonth = now.month == 12 ? DateTime(now.year + 1, 1, 1) : DateTime(now.year, now.month + 1, 1);
+      final periodEnd = DateTime(nextMonth.year, nextMonth.month, 0);
       final budgets = await _dbService.getBudgets(
           startDate: periodStart, endDate: periodEnd);
       setState(() {
@@ -67,7 +69,9 @@ class _BudgetSettingsScreenState extends State<BudgetSettingsScreen> {
     try {
       final now = DateTime.now();
       final periodStart = DateTime(now.year, now.month, 1);
-      final periodEnd = DateTime(now.year, now.month + 1, 0);
+      // Fixed: month + 1 overflow on December
+      final nextMonth = now.month == 12 ? DateTime(now.year + 1, 1, 1) : DateTime(now.year, now.month + 1, 1);
+      final periodEnd = DateTime(nextMonth.year, nextMonth.month, 0);
 
       final budget = Budget(
         id: DateTime.now().millisecondsSinceEpoch.toString(),
@@ -322,7 +326,8 @@ class _BudgetSettingsScreenState extends State<BudgetSettingsScreen> {
       final transactions = await _dbService.getTransactions(limit: 100);
       double monthlyIncome = 0;
       final now = DateTime.now();
-      final threeMonthsAgo = DateTime(now.year, now.month - 3, 1);
+      // Fixed: month - 3 underflow for Jan/Feb/Mar
+      final threeMonthsAgo = now.subtract(const Duration(days: 90));
 
       for (final txn in transactions
           .where((t) => !t.date.isBefore(threeMonthsAgo) && t.type == 'credit')) {
@@ -436,7 +441,8 @@ class _BudgetSettingsScreenState extends State<BudgetSettingsScreen> {
                                       periodStart:
                                           DateTime(now.year, now.month, 1),
                                       periodEnd:
-                                          DateTime(now.year, now.month + 1, 0),
+                                          // Fixed: month + 1 overflow
+                                          (now.month == 12 ? DateTime(now.year + 1, 1, 1) : DateTime(now.year, now.month + 1, 1)).subtract(const Duration(days: 1)),
                                       createdAt: now,
                                     );
                                     await _dbService.insertBudget(budget);

@@ -386,7 +386,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     switch (_dateRangeType) {
       case DateRangeType.thisMonth:
         final start = DateTime(now.year, now.month, 1);
-        final end = DateTime(now.year, now.month + 1, 0);
+        // Fixed: month + 1 overflow on December
+        final nextMonth = now.month == 12 ? DateTime(now.year + 1, 1, 1) : DateTime(now.year, now.month + 1, 1);
+        final end = DateTime(nextMonth.year, nextMonth.month, 0);
         return (start, end);
       case DateRangeType.last30Days:
         final start = now.subtract(const Duration(days: 30));

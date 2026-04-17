@@ -227,6 +227,9 @@ class EnhancedSmsService {
         transaction.category = category;
         transaction.isCategorizedByAI = true;
         transaction.aiConfidence = 0.85;
+      } else {
+        // Use default category if AI fails to return a valid category
+        transaction.category = _getDefaultCategory(transaction);
       }
     } catch (e) {
       print('[SmsService] AI categorization failed: $e');

@@ -359,6 +359,7 @@ User's message: "$text"
       final sorted = categorySpending.entries.toList()
         ..sort((a, b) => b.value.compareTo(a.value));
       final total = categorySpending.values.fold(0.0, (a, b) => a + b);
+      if (total <= 0) return "No spending data available this month.";
       String result =
           "**Your Spending This Month:**\nTotal: QAR ${total.toStringAsFixed(2)}\n\n";
       for (final cat in sorted.take(5)) {

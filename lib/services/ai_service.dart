@@ -437,6 +437,9 @@ User's message: "${userGoals.isEmpty ? "I want to save more money" : userGoals.f
           .writeln("*Total Expenses:* QAR ${totalExpenses.toStringAsFixed(2)}\n");
       analysis.writeln("*Top Categories:*");
 
+      if (totalExpenses <= 0) {
+        return "No expense data found.";
+      }
       for (var i = 0; i < sortedCategories.length && i < 5; i++) {
         final category = sortedCategories[i];
         final percentage = (category.value / totalExpenses * 100);
@@ -504,8 +507,8 @@ User's message: "${userGoals.isEmpty ? "I want to save more money" : userGoals.f
     required List<Budget> existingBudgets,
   }) async {
     final now = DateTime.now();
-    // Issue 7: fixed — was `now.month` (wrong), now correctly uses `now.day`
-    final threeMonthsAgo = DateTime(now.year, now.month - 3, now.day);
+    // Fixed: month - 3 underflow for Jan/Feb/Mar (Issue 7 followup)
+    final threeMonthsAgo = now.subtract(const Duration(days: 90));
 
     final recentTxns = transactions
         .where((t) => !t.date.isBefore(threeMonthsAgo) && t.type == 'debit')

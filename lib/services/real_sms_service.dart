@@ -45,7 +45,7 @@ class RealSmsService {
         id: DateTime.now().millisecondsSinceEpoch.toString(),
         amount: 100.0,
         type: 'debit',
-        category: 'Pending AI Categorization',
+        category: 'Pending',
         description: 'Sample transaction from SMS',
         date: DateTime.now(),
         sender: 'BANK',
@@ -73,13 +73,16 @@ class RealSmsService {
       // Get AI categorization
       final category = await _aiService.categorizeTransaction(transaction);
 
-      if (category != null) {
+      if (category != null && category.isNotEmpty) {
         transaction.category = category;
         transaction.isCategorizedByAI = true;
         transaction.aiConfidence = 0.85; // Placeholder confidence
+      } else {
+        // If AI returns null/empty, keep the transaction as Pending for later re-attempt
+        // This will be picked up by sms_history_service.categorizePendingTransactions()
       }
     } catch (e) {
-      // If AI fails, keep the transaction with manual categorization needed
+      // If AI throws exception, keep the transaction with Pending category
       print('AI categorization failed: $e');
     }
   }
