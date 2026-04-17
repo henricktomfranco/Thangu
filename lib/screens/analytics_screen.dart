@@ -200,7 +200,9 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       lastDate: DateTime.now(),
     );
     if (picked != null && picked != _endDate) {
-      setState(() => _endDate = picked);
+      // Set to end of day (23:59:59) so full day transactions are included
+      final endOfDay = DateTime(picked.year, picked.month, picked.day, 23, 59, 59);
+      setState(() => _endDate = endOfDay);
       _loadData();
     }
   }

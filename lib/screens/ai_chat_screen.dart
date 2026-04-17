@@ -58,7 +58,7 @@ class _AiChatScreenState extends State<AiChatScreen>
       final startOfMonth = DateTime(now.year, now.month, 1);
 
       for (final txn in transactions) {
-        if (txn.date.isAfter(startOfMonth)) {
+        if (txn.date.year == now.year && txn.date.month == now.month) {
           if (txn.type == 'credit') {
             monthlyIncome += txn.amount;
           } else {

@@ -205,7 +205,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           }
         }
 
-        final isCurrentMonth = txn.date.isAfter(startOfMonth);
+        final isCurrentMonth = txn.date.year == now.year && txn.date.month == now.month;
 
         // Calculate balance - accumulate net from transactions only
         if (txn.type == 'credit') {

@@ -325,7 +325,7 @@ class _BudgetSettingsScreenState extends State<BudgetSettingsScreen> {
       final threeMonthsAgo = DateTime(now.year, now.month - 3, 1);
 
       for (final txn in transactions
-          .where((t) => t.date.isAfter(threeMonthsAgo) && t.type == 'credit')) {
+          .where((t) => !t.date.isBefore(threeMonthsAgo) && t.type == 'credit')) {
         monthlyIncome += txn.amount;
       }
       monthlyIncome = monthlyIncome / 3;

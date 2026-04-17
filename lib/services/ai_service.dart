@@ -508,7 +508,7 @@ User's message: "${userGoals.isEmpty ? "I want to save more money" : userGoals.f
     final threeMonthsAgo = DateTime(now.year, now.month - 3, now.day);
 
     final recentTxns = transactions
-        .where((t) => t.date.isAfter(threeMonthsAgo) && t.type == 'debit')
+        .where((t) => !t.date.isBefore(threeMonthsAgo) && t.type == 'debit')
         .toList();
 
     final Map<String, List<double>> categoryHistory = {};
