@@ -9,6 +9,8 @@ import 'package:thangu/services/export_service.dart';
 import 'package:thangu/services/proactive_ai_service.dart';
 import 'package:thangu/services/sms_history_service.dart';
 import 'add_transaction_screen.dart';
+import 'debug_screen.dart';
+import 'transaction_verification_screen.dart';
 import '../app_theme.dart';
 import '../services/ai_service.dart';
 import 'category_management_screen.dart';
@@ -33,9 +35,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   double _transactionAlertThreshold = 100.0;
   int _savingAggression = 1;
   String _themeMode = 'dark';
-  double _initialBalance = 0;
-  DateTime? _initialBalanceDate;
-  bool _hasInitialBalance = false;
+  double _correctedBalance = 0;
+  bool _hasCorrectedBalance = false;
 
   // Dynamic Models
   List<String> _availableModels = [];
@@ -156,13 +157,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
           prefs.getDouble('transaction_alert_threshold') ?? 100.0;
       _savingAggression = prefs.getInt('saving_aggression') ?? 1;
 
-      // Load initial balance
-      _initialBalance = prefs.getDouble('initial_balance') ?? 0;
-      final savedDate = prefs.getString('initial_balance_date');
-      if (savedDate != null) {
-        _initialBalanceDate = DateTime.parse(savedDate);
+      // Load corrected balance
+      _correctedBalance = prefs.getDouble('corrected_balance') ?? 0;
+      if (_correctedBalance == 0) {
+        _correctedBalance = prefs.getDouble('initial_balance') ?? 0; // backward compat
       }
-      _hasInitialBalance = _initialBalance > 0;
+      _hasCorrectedBalance = _correctedBalance != 0;
 
       // Initialize with default models
       _availableModels =
@@ -181,10 +181,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await prefs.setDouble(
         'transaction_alert_threshold', _transactionAlertThreshold);
     await prefs.setInt('saving_aggression', _savingAggression);
-    if (_hasInitialBalance && _initialBalanceDate != null) {
-      await prefs.setDouble('initial_balance', _initialBalance);
-      await prefs.setString(
-          'initial_balance_date', _initialBalanceDate!.toIso8601String());
+    if (_hasCorrectedBalance) {
+      await prefs.setDouble('corrected_balance', _correctedBalance);
+    } else {
+      await prefs.remove('corrected_balance');
     }
 
     // Also save to AI service
@@ -350,9 +350,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  Future<void> _setInitialBalance() async {
+  Future<void> _setCorrectedBalance() async {
     final controller = TextEditingController(
-        text: _initialBalance > 0 ? _initialBalance.toStringAsFixed(0) : '');
+        text: _correctedBalance != 0 ? _correctedBalance.toStringAsFixed(2) : '');
 
     showModalBottomSheet(
       context: context,
@@ -367,16 +367,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Set Initial Balance',
+            const Text('Set Corrected Balance',
                 style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             const Text(
-                'Enter your current account balance. Future transactions will be calculated from this amount.',
+                'Enter your actual account balance. This adjusts the displayed balance without affecting transaction history.',
                 style: TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
-            if (_hasInitialBalance && _initialBalanceDate != null) ...[
+            if (_hasCorrectedBalance) ...[
               const SizedBox(height: 8),
               Text(
-                  'Current: QAR${_initialBalance.toStringAsFixed(2)} (set on ${_initialBalanceDate!.day}/${_initialBalanceDate!.month}/${_initialBalanceDate!.year})',
+                  'Current correction: QAR ${_correctedBalance.toStringAsFixed(2)}',
                   style: TextStyle(color: AppTheme.accentOrange, fontSize: 12)),
             ],
             const SizedBox(height: 16),
@@ -384,8 +384,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               controller: controller,
               keyboardType: TextInputType.number,
               decoration: InputDecoration(
-                labelText: 'Current Balance (QAR)',
-                hintText: 'e.g., 10000',
+                labelText: 'Corrected Balance (QAR)',
+                hintText: 'e.g., 15000.50',
                 filled: true,
                 fillColor: AppTheme.surface,
                 border: OutlineInputBorder(
@@ -398,16 +398,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: () async {
-                  final amount = double.tryParse(controller.text);
-                  if (amount != null && amount >= 0) {
-                    setState(() {
-                      _initialBalance = amount;
-                      _initialBalanceDate = DateTime.now();
-                      _hasInitialBalance = true;
-                    });
-                    await _saveSettings();
-                    if (mounted) Navigator.pop(context);
-                  }
+                  final amount = double.tryParse(controller.text) ?? 0;
+                  setState(() {
+                    _correctedBalance = amount;
+                    _hasCorrectedBalance = amount != 0;
+                  });
+                  await _saveSettings();
+                  if (mounted) Navigator.pop(context);
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppTheme.primary,
@@ -425,13 +422,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Future<void> _resetInitialBalance() async {
+  Future<void> _resetCorrectedBalance() async {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Reset Balance?'),
+        title: const Text('Reset Corrected Balance?'),
         content: const Text(
-            'This will clear your initial balance. Balance will be calculated from all transactions.'),
+            'This will remove the balance correction. Balance will be calculated from all transactions only.'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
@@ -445,13 +442,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     if (confirm == true) {
       setState(() {
-        _initialBalance = 0;
-        _initialBalanceDate = null;
-        _hasInitialBalance = false;
+        _correctedBalance = 0;
+        _hasCorrectedBalance = false;
       });
       final prefs = await SharedPreferences.getInstance();
-      await prefs.remove('initial_balance');
-      await prefs.remove('initial_balance_date');
+      await prefs.remove('corrected_balance');
+      await prefs.remove('initial_balance'); // backward compat
     }
   }
 
@@ -554,6 +550,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       );
 
+      // Only scan NEW SMS (ID-based filtering)
       final count = await _smsHistoryService.loadHistoricalSms(
         lastDays: 90,
         useAI: true,
@@ -563,7 +560,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Found $count transactions'),
+            content: Text(count > 0 ? 'Found $count new transactions' : 'No new transactions found'),
             backgroundColor: count > 0 ? AppTheme.accentGreen : AppTheme.accent,
           ),
         );
@@ -736,12 +733,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _buildNavigationRow(
               icon: Icons.account_balance_wallet_rounded,
               iconColor: AppTheme.accentGreen,
-              title: 'Set Initial Balance',
-              subtitle: _hasInitialBalance
-                  ? 'QAR${_initialBalance.toStringAsFixed(0)} (${_initialBalanceDate!.day}/${_initialBalanceDate!.month})'
-                  : 'Configure your starting balance',
-              onTap: _setInitialBalance,
+              title: 'Corrected Balance',
+              subtitle: _hasCorrectedBalance
+                  ? 'QAR ${_correctedBalance.toStringAsFixed(2)}'
+                  : 'Adjust your displayed balance',
+              onTap: _setCorrectedBalance,
             ),
+            _buildDivider(),
+            if (_hasCorrectedBalance)
+              _buildNavigationRow(
+                icon: Icons.restore_rounded,
+                iconColor: AppTheme.accentRed,
+                title: 'Reset Corrected Balance',
+                subtitle: 'Remove balance correction',
+                onTap: _resetCorrectedBalance,
+              ),
           ]),
 
           // ─── Proactive Coach ───────────────────────────
@@ -767,6 +773,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
               title: 'Full History Scan',
               subtitle: 'Scan last 90 days (one-time)',
               onTap: _fullScanHistory,
+            ),
+            _buildDivider(),
+            _buildNavigationRow(
+              icon: Icons.verified_user_rounded,
+              iconColor: AppTheme.accentGreen,
+              title: 'Verify Transactions',
+              subtitle: 'Review and confirm SMS imports',
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const TransactionVerificationScreen(),
+                ),
+              ),
+            ),
+            _buildDivider(),
+            _buildNavigationRow(
+              icon: Icons.bug_report_rounded,
+              iconColor: AppTheme.accentRed,
+              title: 'SMS Debug',
+              subtitle: 'View raw SMS and diagnose issues',
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const DebugScreen(),
+                ),
+              ),
             ),
             _buildDivider(),
             _buildNavigationRow(

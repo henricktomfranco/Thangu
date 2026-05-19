@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:thangu/models/transaction.dart';
 import 'package:thangu/services/proactive_ai_service.dart';
@@ -51,14 +52,15 @@ class EnhancedSmsService {
       final Map<dynamic, dynamic> args = call.arguments;
       final String smsBody = args['body'] ?? '';
       final String sender = args['sender'] ?? '';
+      final int timestamp = args['timestamp'] ?? DateTime.now().millisecondsSinceEpoch;
 
       print('[SmsService] Received SMS from $sender');
-      await _processSms(smsBody, sender);
+      await _processSms(smsBody, sender, timestamp: timestamp);
     }
   }
 
   /// Process incoming SMS and create transaction
-  Future<void> _processSms(String smsBody, String sender) async {
+  Future<void> _processSms(String smsBody, String sender, {int? timestamp}) async {
     try {
       // Check if this is a financial transaction SMS
       if (!_isFinancialSms(smsBody)) {
@@ -66,14 +68,22 @@ class EnhancedSmsService {
         return;
       }
 
+      // Generate unique SMS fingerprint for duplicate detection
+      final smsFingerprint = _generateSmsFingerprint(smsBody, sender, timestamp);
+      final alreadyProcessed = await _dbService.isSmsProcessed(smsFingerprint);
+      if (alreadyProcessed) {
+        print('[SmsService] ⊘ Duplicate SMS skipped (fingerprint: $smsFingerprint)');
+        return;
+      }
+
       // Parse SMS content
-      final transaction = _parseSmsContent(smsBody, sender);
+      final transaction = _parseSmsContent(smsBody, sender, timestamp: timestamp);
 
       // Categorize with AI
       await _categorizeWithAI(transaction);
 
-      // Save to database
-      await _dbService.insertTransaction(transaction);
+      // Atomic insert + SMS tracking
+      await _dbService.insertTransactionWithSmsTracking(transaction, smsFingerprint);
 
       // Emit transaction for UI updates
       _transactionController.add(transaction);
@@ -113,6 +123,11 @@ class EnhancedSmsService {
       return false;
     }
 
+    // Skip balance enquiry SMS (no transaction action)
+    if (_isBalanceEnquiryOnly(lowerBody)) {
+      return false;
+    }
+
     final financialKeywords = [
       'debit',
       'credit',
@@ -120,7 +135,6 @@ class EnhancedSmsService {
       'payment',
       'deposit',
       'withdrawn',
-      'balance',
       'account',
       'transaction',
       'amount',
@@ -134,15 +148,42 @@ class EnhancedSmsService {
     return financialKeywords.any((keyword) => lowerBody.contains(keyword));
   }
 
+  /// Detect balance enquiry SMS that should be skipped
+  bool _isBalanceEnquiryOnly(String lowerBody) {
+    final transactionActions = [
+      'spent', 'purchase', 'paid', 'debited', 'credited',
+      'withdraw', 'deposit', 'transfer', 'sent', 'received',
+      'refund', 'cashback', 'salary', 'used for',
+      'صرف', 'دفع', 'شراء', 'إيداع', 'سحب', 'تحويل',
+    ];
+
+    final hasTransactionAction = transactionActions.any(lowerBody.contains);
+    if (hasTransactionAction) return false;
+
+    final hasBalanceKeyword = lowerBody.contains('balance') ||
+        lowerBody.contains('bal:') ||
+        lowerBody.contains('avail') ||
+        lowerBody.contains('الرصيد');
+
+    return hasBalanceKeyword;
+  }
+
   /// Parse SMS content and extract transaction details
-  Transaction _parseSmsContent(String smsBody, String sender) {
+  Transaction _parseSmsContent(String smsBody, String sender, {int? timestamp}) {
+    final date = timestamp != null
+        ? DateTime.fromMillisecondsSinceEpoch(timestamp)
+        : DateTime.now();
+
+    final merchantInfo = _extractMerchantInfo(smsBody);
+
     final transaction = Transaction(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       amount: _extractAmount(smsBody),
       type: _extractType(smsBody),
       category: 'Pending',
-      description: _extractDescription(smsBody),
-      date: DateTime.now(),
+      description: merchantInfo.description,
+      merchant: merchantInfo.merchant,
+      date: date,
       sender: _sanitizeSender(sender),
       isCategorizedByAI: false,
       aiConfidence: 0.0,
@@ -151,32 +192,207 @@ class EnhancedSmsService {
     return _accountService.attachAccountInfo(transaction, smsBody);
   }
 
+  /// Extract both merchant name and clean description from SMS
+  ({String? merchant, String description}) _extractMerchantInfo(String smsBody) {
+    // Priority 1: "at MERCHANT NAME" pattern
+    final atPattern = RegExp(r'at\s+([A-Z][A-Za-z\s\d\.\-]{2,40}?)(?:\s+at\s|\s+Balance:|\s+Enquiry|\s+at\s+\d|Enquiry\s+\d|$)', multiLine: true);
+    var match = atPattern.firstMatch(smsBody);
+    if (match != null && match.groupCount > 0) {
+      String merchant = match.group(1)?.trim() ?? '';
+      merchant = _cleanMerchantName(merchant);
+      if (merchant.isNotEmpty && merchant.length > 2) {
+        return (merchant: merchant, description: _buildDescription(smsBody, merchant));
+      }
+    }
+
+    // Priority 2: "used for QAR X at MERCHANT" pattern
+    final usedPattern = RegExp(r'used\s+for[^\s]+\s+(?:QAR|AED|SAR|INR|Rs\.?|USD|EUR|GBP|₹|€|£)[^\s]*\s+([A-Z][A-Za-z\s\d\.\-]{2,40}?)(?:\s+at\s|\s+Balance:|\s+Enquiry|\s+at\s+\d|Enquiry\s+\d|$)', multiLine: true);
+    match = usedPattern.firstMatch(smsBody);
+    if (match != null && match.groupCount > 0) {
+      String merchant = match.group(1)?.trim() ?? '';
+      merchant = _cleanMerchantName(merchant);
+      if (merchant.isNotEmpty && merchant.length > 2) {
+        return (merchant: merchant, description: _buildDescription(smsBody, merchant));
+      }
+    }
+
+    // Priority 3: "POS purchase at MERCHANT"
+    final purchasePattern = RegExp(r'(?:POS|online|purchase|payment)\s+(?:at\s+)?([A-Z][A-Za-z\s\d\.\-]{2,40}?)(?:\s+at\s|\s+Balance:|\s+Enquiry|\s+for\s|$)', multiLine: true);
+    match = purchasePattern.firstMatch(smsBody);
+    if (match != null && match.groupCount > 0) {
+      String merchant = match.group(1)?.trim() ?? '';
+      merchant = _cleanMerchantName(merchant);
+      if (merchant.isNotEmpty && merchant.length > 2) {
+        return (merchant: merchant, description: _buildDescription(smsBody, merchant));
+      }
+    }
+
+    return (merchant: null, description: _buildFallbackDescription(smsBody));
+  }
+
+  String _cleanMerchantName(String name) {
+    return name
+        .replaceAll(RegExp(r'\s+at\s*$'), '')
+        .replaceAll(RegExp(r'\s+Balance.*$'), '')
+        .replaceAll(RegExp(r'\s+Enquiry.*$'), '')
+        .replaceAll(RegExp(r'\s+\d{1,2}:\d{2}\s*$'), '')
+        .trim();
+  }
+
+  String _buildDescription(String smsBody, String merchant) {
+    final lower = smsBody.toLowerCase();
+    String context = '';
+    if (lower.contains('spent') || lower.contains('debited')) context = 'Payment';
+    else if (lower.contains('credited') || lower.contains('received')) context = 'Received';
+    else if (lower.contains('transfer')) context = 'Transfer';
+    else if (lower.contains('withdraw')) context = 'Withdrawal';
+
+    return context.isNotEmpty ? '$context at $merchant' : merchant;
+  }
+
+  String _buildFallbackDescription(String smsBody) {
+    String cleaned = smsBody.replaceAll(
+      RegExp(r'(OTP|PIN|CVV|ATM)[\:\s]+[\w\d]+', caseSensitive: false),
+      '[REDACTED]',
+    );
+    cleaned = cleaned.replaceAll(RegExp(r'\s*Balance:.*$', multiLine: true), '');
+    cleaned = cleaned.replaceAll(RegExp(r'\s*Enquiry.*$', multiLine: true), '');
+    if (cleaned.length > 60) cleaned = cleaned.substring(0, 60).trim() + '...';
+    return cleaned.isEmpty ? 'Transaction' : cleaned.trim();
+  }
+
   /// Extract amount from SMS using robust patterns (Issue 22: Synced with SmsHistoryService)
   double _extractAmount(String smsBody) {
     try {
-      final RegExp regExp = RegExp(
+      // Normalize Arabic digits to Western digits first
+      final normalizedBody = _normalizeArabicDigits(smsBody);
+
+      // Pattern to find all currency-prefixed amounts with their surrounding context
+      final currencyPattern = RegExp(
         r'(?:Rs\.?|INR|₹|QAR|QR\.?|AED|SAR|USD|\$|EUR|€|GBP|£)\s*([0-9,]+\.?[0-9]*)',
         caseSensitive: false,
       );
-      final Match? match = regExp.firstMatch(smsBody);
-      if (match != null) {
-        String amountStr = match.group(1) ?? '0';
-        amountStr = amountStr.replaceAll(',', '');
-        return double.parse(amountStr);
+
+      final matches = currencyPattern.allMatches(normalizedBody).toList();
+      if (matches.isEmpty) {
+        return _fallbackExtractAmount(normalizedBody);
       }
 
-      final RegExp fallbackRegExp = RegExp(r'([0-9]{2,}(?:\.[0-9]{2})?)\b');
-      final Match? fallbackMatch = fallbackRegExp.firstMatch(smsBody);
-      if (fallbackMatch != null) {
-        String amountStr = fallbackMatch.group(1) ?? '0';
-        amountStr = amountStr.replaceAll(',', '');
-        final amount = double.parse(amountStr);
-        if (amount > 0.1 && amount < 1000000) return amount;
+      // If only one amount found, use it
+      if (matches.length == 1) {
+        return _parseAmountStr(matches.first.group(1) ?? '0');
       }
+
+      // Multiple amounts: find the transaction amount (not balance)
+      for (final match in matches) {
+        final startIdx = match.start;
+        final contextStart = startIdx > 80 ? startIdx - 80 : 0;
+        final context = normalizedBody.substring(contextStart, startIdx).toLowerCase();
+
+        if (_isBalanceContext(context)) {
+          continue;
+        }
+
+        if (_isTransactionContext(context)) {
+          return _parseAmountStr(match.group(1) ?? '0');
+        }
+      }
+
+      // No transaction-specific amount found, return first non-balance amount
+      for (final match in matches) {
+        final startIdx = match.start;
+        final contextStart = startIdx > 80 ? startIdx - 80 : 0;
+        final context = normalizedBody.substring(contextStart, startIdx).toLowerCase();
+
+        if (!_isBalanceContext(context)) {
+          return _parseAmountStr(match.group(1) ?? '0');
+        }
+      }
+
+      // Last resort: if exactly 2 amounts, pick the smaller one
+      if (matches.length == 2) {
+        final amt1 = _parseAmountStr(matches.first.group(1) ?? '0');
+        final amt2 = _parseAmountStr(matches.last.group(1) ?? '0');
+        return amt1 < amt2 ? amt1 : amt2;
+      }
+
+      return _parseAmountStr(matches.first.group(1) ?? '0');
     } catch (e) {
       print('[SmsService] Error extracting amount: $e');
     }
     return 0.0;
+  }
+
+  /// Normalize Arabic digits (٠-٩) to Western digits (0-9)
+  String _normalizeArabicDigits(String text) {
+    return text
+        .replaceAll('٠', '0')
+        .replaceAll('١', '1')
+        .replaceAll('٢', '2')
+        .replaceAll('٣', '3')
+        .replaceAll('٤', '4')
+        .replaceAll('٥', '5')
+        .replaceAll('٦', '6')
+        .replaceAll('٧', '7')
+        .replaceAll('٨', '8')
+        .replaceAll('٩', '9');
+  }
+
+  /// Check if context indicates a balance amount
+  bool _isBalanceContext(String context) {
+    return context.contains('balance') ||
+        context.contains('bal:') ||
+        context.contains('bal ') ||
+        context.contains('available') ||
+        context.contains('closing bal') ||
+        context.contains('current bal') ||
+        context.contains('avail bal') ||
+        context.contains('الرصيد');
+  }
+
+  /// Check if context indicates a transaction amount
+  bool _isTransactionContext(String context) {
+    return context.contains('spent') ||
+        context.contains('debited') ||
+        context.contains('paid') ||
+        context.contains('used for') ||
+        context.contains('purchase') ||
+        context.contains('payment') ||
+        context.contains('transfer') ||
+        context.contains('withdraw') ||
+        context.contains('credited') ||
+        context.contains('deposited') ||
+        context.contains('sent') ||
+        context.contains('received') ||
+        context.contains('refund') ||
+        context.contains('salary') ||
+        context.contains('cashback') ||
+        context.contains('صرف') ||
+        context.contains('دفع') ||
+        context.contains('شراء');
+  }
+
+  /// Fallback amount extraction when no currency prefix found
+  double _fallbackExtractAmount(String smsBody) {
+    // Only match numbers that look like monetary amounts:
+    // - Must have exactly 2 decimal places (e.g., "123.45") OR
+    // - Be 2-5 digits without decimals (small amounts)
+    // This excludes card numbers (4+ digits), phone numbers, dates, reference numbers
+    final RegExp amountPattern = RegExp(r'(?<!\d)(\d{2,5}\.\d{2})(?!\d)');
+    final Match? match = amountPattern.firstMatch(smsBody);
+    if (match != null) {
+      String amountStr = match.group(1) ?? '0';
+      amountStr = amountStr.replaceAll(',', '');
+      final amount = double.parse(amountStr);
+      if (amount > 0.01 && amount < 100000) return amount;
+    }
+    return 0.0;
+  }
+
+  /// Parse amount string removing commas
+  double _parseAmountStr(String amountStr) {
+    final cleaned = amountStr.replaceAll(',', '');
+    return double.parse(cleaned);
   }
 
   /// Determine transaction type
@@ -195,21 +411,6 @@ class EnhancedSmsService {
 
     // Debit indicators (default)
     return 'debit';
-  }
-
-  /// Extract description from SMS
-  String _extractDescription(String smsBody) {
-    // Remove sensitive information pattern
-    String cleaned = smsBody.replaceAll(
-      RegExp(r'(OTP|PIN|CVV|ATM|Card|A/c|Account)[:\s]+[\w\d]+', caseSensitive: false),
-      '[REDACTED]',
-    );
-
-    // Truncate to reasonable length
-    if (cleaned.length > 100) {
-      return cleaned.substring(0, 100).trim() + '...';
-    }
-    return cleaned.trim();
   }
 
   /// Sanitize sender information
@@ -260,6 +461,22 @@ class EnhancedSmsService {
     }
 
     return 'Other';
+  }
+
+  /// Generate unique fingerprint for SMS duplicate detection
+  String _generateSmsFingerprint(String body, String sender, int? timestamp) {
+    // Use composite key: sender + timestamp + first 50 chars of body
+    // This is more reliable than full body (handles minor SMS variations)
+    final bodyPreview = body.length > 50 ? body.substring(0, 50) : body;
+    final data = '${sender}_${timestamp ?? 0}_${bodyPreview}';
+    final bytes = utf8.encode(data);
+    // FNV-1a hash for consistent fingerprinting
+    int hash = 0x811c9dc5;
+    for (final byte in bytes) {
+      hash ^= byte;
+      hash = (hash * 0x01000193) & 0xFFFFFFFF;
+    }
+    return 'sms_${hash.toRadixString(16).padLeft(8, '0')}';
   }
 
   /// Dispose resources

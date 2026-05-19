@@ -6,8 +6,13 @@ import 'package:thangu/services/database_service.dart';
 /// Account detection and management service
 /// Tracks unique card/account numbers and groups transactions
 class AccountService {
+  static final AccountService _instance = AccountService._internal();
+  factory AccountService() => _instance;
+  AccountService._internal();
+
   final DatabaseService _dbService = DatabaseService();
   final Map<String, Account> _accounts = {};
+  bool _initialized = false;
 
   // Account standard prefixes
   static const List<String> _accountPrefixes = [
@@ -19,11 +24,15 @@ class AccountService {
     'ACCOUNT'
   ];
 
-  AccountService() {
-    _loadAccounts();
+  /// Initialize and load accounts from SharedPreferences
+  /// Must be called before using the service
+  Future<void> initialize() async {
+    if (_initialized) return;
+    await _loadAccounts();
+    _initialized = true;
   }
 
-  // Issue 36: Load accounts from SharedPreferences
+  // Load accounts from SharedPreferences
   Future<void> _loadAccounts() async {
     final prefs = await SharedPreferences.getInstance();
     final keys = prefs.getKeys();

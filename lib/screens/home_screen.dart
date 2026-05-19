@@ -5,6 +5,7 @@ import 'package:thangu/screens/analytics_screen.dart';
 import 'package:thangu/services/account_service.dart';
 import 'package:thangu/services/sms_history_service.dart';
 import 'package:thangu/services/enhanced_sms_service.dart';
+import 'package:thangu/services/permission_service.dart';
 import 'dart:async';
 import '../app_theme.dart';
 import '../services/database_service.dart';
@@ -12,12 +13,14 @@ import '../models/account_summary.dart';
 import '../models/transaction.dart' as app_txn;
 import '../models/goal.dart';
 import '../models/budget.dart';
+import 'add_transaction_screen.dart';
 import 'transactions_screen.dart';
 import 'goals_screen.dart';
 import 'ai_chat_screen.dart';
 import 'settings_screen.dart';
 import 'budget_settings_screen.dart';
 import 'bill_reminders_screen.dart';
+import 'transaction_verification_screen.dart';
 
 enum DateRangeType { thisMonth, last30Days, custom }
 
@@ -46,11 +49,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   double _totalBalance = 0;
   double _monthlyIncome = 0;
   double _spentAmount = 0;
+  int _monthlyTransactionCount = 0;
+  int _unverifiedCount = 0;
   bool _isLoading = true;
   int _currentNavIndex = 0;
+  DateTime _lastDataLoad = DateTime.now();
+  static const int _minRefreshIntervalMs = 5000;
   DateRangeType _dateRangeType = DateRangeType.thisMonth;
   DateTime _customStartDate = DateTime.now();
   DateTime _customEndDate = DateTime.now();
+
+  // Ensures the one-time first-run SMS import only runs once per app lifecycle
+  static bool _firstRunHandled = false;
 
   late AnimationController _fadeController;
   late Animation<double> _fadeAnimation;
@@ -66,12 +76,27 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       parent: _fadeController,
       curve: Curves.easeOut,
     );
-    _loadData();
 
-    // Listen for real-time incoming SMS transactions and auto-refresh UI
+    // Initialize real-time SMS listener
+    _enhancedSmsService.initializeSmsListener();
+
+    // Start background scanning for new SMS every 5 min
+    _smsHistoryService.startBackgroundScanning();
+
+    // Check if this is first run — show initial balance setup
+    _checkFirstRun();
+
+    _loadData();
+    _loadDateRangePreferences();
+
+    // Listen for real-time incoming SMS transactions and auto-refresh UI (throttled)
     _smsSubscription = _enhancedSmsService.transactionStream.listen((_) {
       if (mounted) {
-        _loadData();
+        final now = DateTime.now();
+        if (now.difference(_lastDataLoad).inMilliseconds >= _minRefreshIntervalMs) {
+          _lastDataLoad = now;
+          _loadData();
+        }
       }
     });
   }
@@ -86,21 +111,39 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           title: const Text('Select Account'),
           content: SizedBox(
             width: double.minPositive,
-            height: MediaQuery.of(context).size.height * 0.5,
+            height: MediaQuery.of(context).size.height * 0.6,
             child: ListView.builder(
               itemCount: _accountSummaries.length,
               itemBuilder: (context, index) {
                 final account = _accountSummaries[index];
                 final isSelected =
                     account.accountNumber == _activeAccount.accountNumber;
+                final displayNumber = account.accountNumber == 'ALL'
+                    ? 'All accounts'
+                    : account.accountNumber.length > 4
+                        ? '****${account.accountNumber.substring(account.accountNumber.length - 4)}'
+                        : account.accountNumber;
                 return ListTile(
                   title: Text(account.accountName),
-                  subtitle: Text(account.accountNumber == 'ALL'
-                      ? 'All accounts'
-                      : '**${account.accountNumber}'),
-                  trailing:
-                      Text('QAR${account.currentBalance.toStringAsFixed(2)}'),
+                  subtitle: Text(displayNumber),
+                  trailing: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text('QAR${account.currentBalance.toStringAsFixed(0)}',
+                          style: TextStyle(
+                              color: AppTheme.textPrimary,
+                              fontWeight: FontWeight.w600)),
+                      if (account.monthlyIncome > 0)
+                        Text(
+                          'Income: ${account.monthlyIncome.toStringAsFixed(0)}',
+                          style: const TextStyle(
+                              fontSize: 11, color: AppTheme.textTertiary),
+                        ),
+                    ],
+                  ),
                   selected: isSelected,
+                  selectedTileColor: AppTheme.primary.withOpacity(0.1),
                   onTap: () {
                     setState(() {
                       _activeAccount = account;
@@ -129,24 +172,143 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     super.dispose();
   }
 
-  /// Get consistent total balance from app storage
-  Future<double> _getConsistentTotalBalance() async {
+  /// Check if this is first run and show corrected balance setup
+  Future<void> _checkFirstRun() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getDouble('total_balance') ?? 0;
+    final hasCorrectedBalance = prefs.getDouble('corrected_balance') != null;
+    final hasSeenOnboarding = prefs.getBool('has_seen_onboarding') ?? false;
+
+    if (!hasSeenOnboarding && mounted) {
+      await Future.delayed(const Duration(milliseconds: 500));
+      if (mounted) {
+        _showCorrectedBalanceDialog();
+      }
+    }
   }
 
-  /// Save total balance to app storage for consistency
-  Future<void> _saveTotalBalance(double balance) async {
+  /// Show corrected balance setup dialog
+  void _showCorrectedBalanceDialog() {
+    final controller = TextEditingController();
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.surfaceCard,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                gradient: AppTheme.primaryGradient,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(Icons.account_balance_wallet_rounded, color: Colors.white, size: 24),
+            ),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text('Welcome to Thangu!', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'To show accurate balances, you can enter your current account balance. '
+              'This is optional — you can always set or adjust it later from Settings.',
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: controller,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              autofocus: true,
+              decoration: InputDecoration(
+                labelText: 'Current Balance (QAR)',
+                hintText: 'e.g., 10000 or leave empty to skip',
+                filled: true,
+                fillColor: AppTheme.surface,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                prefixIcon: const Icon(Icons.money_rounded, color: AppTheme.textTertiary),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.setBool('has_seen_onboarding', true);
+              if (context.mounted) Navigator.pop(ctx);
+              _loadData();
+            },
+            child: const Text('Skip'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final amount = double.tryParse(controller.text) ?? 0;
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.setDouble('corrected_balance', amount);
+              await prefs.setBool('has_seen_onboarding', true);
+              if (context.mounted) {
+                Navigator.pop(ctx);
+                _loadData();
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.primary,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Load date range from preferences
+  Future<void> _loadDateRangePreferences() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setDouble('total_balance', balance);
+    final savedRangeType = prefs.getString('date_range_type');
+    if (savedRangeType != null) {
+      try {
+        _dateRangeType = DateRangeType.values.firstWhere(
+          (e) => e.toString() == 'DateRangeType.$savedRangeType',
+          orElse: () => DateRangeType.thisMonth,
+        );
+        final startDate = prefs.getString('custom_start_date');
+        final endDate = prefs.getString('custom_end_date');
+        if (startDate != null && endDate != null) {
+          _customStartDate = DateTime.parse(startDate);
+          _customEndDate = DateTime.parse(endDate);
+        }
+      } catch (e) {
+        // Default to thisMonth if parsing fails
+      }
+    }
+  }
+
+  /// Save date range to preferences
+  Future<void> _saveDateRangePreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('date_range_type', _dateRangeType.toString().split('.').last);
+    if (_dateRangeType == DateRangeType.custom) {
+      await prefs.setString('custom_start_date', _customStartDate.toIso8601String());
+      await prefs.setString('custom_end_date', _customEndDate.toIso8601String());
+    }
   }
 
   /// Calculate total balance from transactions
   double _calculateTotalBalanceFromTransactions(
       List<app_txn.Transaction> transactions) {
     double balance = 0;
-    // Sort by date for accurate balance calculation
-    final sorted = transactions..sort((a, b) => a.date.compareTo(b.date));
+    // Sort by date for accurate balance calculation (create copy to avoid mutating original)
+    final sorted = List<app_txn.Transaction>.from(transactions)
+      ..sort((a, b) => a.date.compareTo(b.date));
     for (final txn in sorted) {
       if (txn.type == 'credit') {
         balance += txn.amount;
@@ -160,12 +322,51 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
     try {
-      // Scan for new SMS before loading data
-      await _smsHistoryService.forceScanSms(useAI: true);
+      // ── First-run SMS import ──────────────────────────────────────────────
+      // Runs only once per app lifecycle. Uses the DB (processed_sms table) as
+      // ground truth: if nothing has ever been processed, import 90 days of
+      // history after requesting permission. Subsequent calls are instant no-ops.
+      if (!_firstRunHandled) {
+        _firstRunHandled = true; // set immediately to block re-entrant calls
+        final lastId = await _dbService.getLastProcessedSmsId();
+        if (lastId == null) {
+          // No SMS ever processed — need the full historical import.
+          print('[HomeScreen] First run detected. Requesting SMS permission...');
+          final granted = await PermissionService.requestSmsPermissions();
+          if (granted) {
+            print('[HomeScreen] Permission granted. Scanning 90 days of SMS...');
+            final count = await _smsHistoryService.loadHistoricalSms(
+              lastDays: 90,
+              useAI: false,
+              isFirstLoad: true,
+            );
+            print('[HomeScreen] ✓ First-run scan done: $count transactions');
+            if (mounted && count > 0) {
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text('Imported $count transactions from SMS history'),
+                duration: const Duration(seconds: 3),
+              ));
+            }
+          } else {
+            print('[HomeScreen] SMS permission denied — skipping first-run scan');
+            // Reset flag so the next _loadData() call retries the permission request
+            _firstRunHandled = false;
+          }
+        }
+      } else {
+        // Subsequent loads: only pick up new SMS since last scan
+        await _smsHistoryService.forceScanSms(useAI: true);
+      }
 
-      // Get ALL transactions (filter by account if selected)
-      final transactions = await _dbService.getTransactions(
-          startDate: DateTime.now().subtract(Duration(days: 365 * 10)));
+      // Get transactions for balance calculation
+      // Fetch from initial balance date if set, otherwise last 2 years
+      final prefs = await SharedPreferences.getInstance();
+      final initialBalanceDateStr = prefs.getString('initial_balance_date');
+      final startDate = initialBalanceDateStr != null
+          ? DateTime.parse(initialBalanceDateStr)
+          : DateTime.now().subtract(const Duration(days: 365 * 2));
+
+      final transactions = await _dbService.getTransactions(startDate: startDate, limit: 5000);
           
       // Check for month rollover auto-savings
       await _checkAndApplyRollover(transactions);
@@ -182,59 +383,48 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       // Track account summaries
       final Map<String, AccountSummary> accountMap = {};
 
-      // Load initial balance for new calculation method
-      double initialBalance = 0;
-      DateTime? initialBalanceDate;
-      final prefs = await SharedPreferences.getInstance();
-      initialBalance = prefs.getDouble('initial_balance') ?? 0;
-      final savedDate = prefs.getString('initial_balance_date');
-      if (savedDate != null) {
-        initialBalanceDate = DateTime.parse(savedDate);
+      // Load corrected balance (user's actual current balance)
+      double correctedBalance = prefs.getDouble('corrected_balance') ?? 0;
+      if (correctedBalance == 0) {
+        correctedBalance = prefs.getDouble('initial_balance') ?? 0; // backward compat
       }
-      final hasInitialBalance = initialBalance > 0;
+      final hasCorrectedBalance = correctedBalance != 0;
 
-      // Calculate net change from transactions (not including initial balance)
-      double netFromTransactions = 0;
+      // Get the selected date range for income/expense calculation
+      final (periodStart, periodEnd) = _getDateRange();
 
-      // Process transactions
+      // Calculate income and expense within the selected period
+      double periodIncome = 0;
+      double periodExpense = 0;
+      final activeAccountNumber = _activeAccount.accountNumber;
+
+      // Process ALL transactions (no date filtering for account summaries)
       for (final txn in transactions) {
-        // Skip transactions before initial balance date (for new method)
-        if (hasInitialBalance && initialBalanceDate != null) {
-          if (txn.date.isBefore(initialBalanceDate)) {
-            continue; // Skip old transactions
-          }
-        }
-
         final isCurrentMonth = txn.date.year == now.year && txn.date.month == now.month;
+        final txnAccountNumber = txn.accountNumber ?? 'UNKNOWN';
+        final matchesActiveAccount = activeAccountNumber == 'ALL' || txnAccountNumber == activeAccountNumber;
 
-        // Calculate balance - accumulate net from transactions only
-        if (txn.type == 'credit') {
-          netFromTransactions += txn.amount;
-        } else {
-          netFromTransactions -= txn.amount;
-        }
-
-        // Monthly stats for current month
-        if (isCurrentMonth) {
+        // Calculate period balance (income - expense for selected date range)
+        final isInPeriod = txn.date.isAfter(periodStart) &&
+            txn.date.isBefore(periodEnd.add(const Duration(days: 1)));
+        if (isInPeriod && matchesActiveAccount) {
           if (txn.type == 'credit') {
-            monthlyIncome += txn.amount;
+            periodIncome += txn.amount;
           } else {
-            // Track money spent
-            spentAmount += txn.amount;
+            periodExpense += txn.amount;
           }
         }
 
-        // Create/update account summary
-        final accountNumber = txn.accountNumber ?? 'UNKNOWN';
+        // Create/update account summary (always for all accounts)
         accountMap.putIfAbsent(
-            accountNumber,
+            txnAccountNumber,
             () => AccountSummary(
-                  accountNumber: accountNumber,
-                  accountName: txn.accountName ?? 'Account $accountNumber',
+                  accountNumber: txnAccountNumber,
+                  accountName: txn.accountName ?? 'Account $txnAccountNumber',
                 ));
 
-        final account = accountMap[accountNumber]!;
-        accountMap[accountNumber] = AccountSummary(
+        final account = accountMap[txnAccountNumber]!;
+        accountMap[txnAccountNumber] = AccountSummary(
           accountNumber: account.accountNumber,
           accountName: account.accountName,
           monthlyIncome: account.monthlyIncome +
@@ -247,12 +437,21 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         );
       }
 
-      // Calculate total balance: initial balance + net from transactions
-      if (hasInitialBalance) {
-        totalBalance = initialBalance + netFromTransactions;
-      } else {
-        totalBalance = netFromTransactions;
+      // Count monthly transactions (active account only)
+      int monthlyTransactionCount = 0;
+      for (final txn in transactions) {
+        if (txn.date.year == now.year && txn.date.month == now.month) {
+          final txnAccountNumber = txn.accountNumber ?? 'UNKNOWN';
+          if (activeAccountNumber == 'ALL' || txnAccountNumber == activeAccountNumber) {
+            monthlyTransactionCount++;
+          }
+        }
       }
+
+      // Total balance = corrected balance (user's actual balance) if set, otherwise income - expense
+      totalBalance = hasCorrectedBalance ? correctedBalance : periodIncome - periodExpense;
+      monthlyIncome = periodIncome;
+      spentAmount = periodExpense;
 
       // Convert to list and add consolidated ALL account
       final accountSummaries = accountMap.values.toList();
@@ -271,7 +470,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       }
 
       // Load budgets for current period
-      final (periodStart, periodEnd) = _getDateRange();
       final budgets = await _dbService.getBudgets();
 
       // Update spent amounts from transactions
@@ -293,8 +491,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         return b.withSpent(categorySpent[b.category] ?? 0);
       }).toList();
 
+      // Fetch unverified transaction count for badge
+      final unverifiedTxns = await _dbService.getUnverifiedTransactions();
+
       setState(() {
-        _recentTransactions = transactions.take(5).toList();
+        _recentTransactions = transactions.take(10).toList();
         _goals = goals;
         _accountSummaries = accountSummaries;
         _activeAccount = accountSummaries.firstWhere(
@@ -304,11 +505,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         _totalBalance = totalBalance;
         _monthlyIncome = monthlyIncome;
         _spentAmount = spentAmount;
+        _monthlyTransactionCount = monthlyTransactionCount;
         _budgets = updatedBudgets;
+        _unverifiedCount = unverifiedTxns.length;
         _isLoading = false;
+        _lastDataLoad = DateTime.now();
       });
       _fadeController.forward();
     } catch (e) {
+      debugPrint('Error loading dashboard data: $e');
       setState(() => _isLoading = false);
       _fadeController.forward();
     }
@@ -336,7 +541,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       double lastMonthExpense = 0;
       
       for (final txn in transactions) {
-        if (txn.date.isAfter(startOfLastMonth) && txn.date.isBefore(endOfLastMonth)) {
+        // Use inclusive boundaries to include midnight transactions
+        if (!txn.date.isBefore(startOfLastMonth) && !txn.date.isAfter(endOfLastMonth)) {
           if (txn.type == 'credit') {
             lastMonthIncome += txn.amount;
           } else {
@@ -352,13 +558,19 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         final activeGoals = goals.where((g) => !g.isAchieved).toList();
         
         if (activeGoals.isNotEmpty) {
-          final share = savings / activeGoals.length;
-          for (final goal in activeGoals) {
+          final sharePerGoal = (savings / activeGoals.length).roundToDouble();
+          for (int i = 0; i < activeGoals.length; i++) {
+            final goal = activeGoals[i];
+            // Add remaining amount to last goal to avoid rounding errors
+            final amountToAdd = i == activeGoals.length - 1
+                ? savings - (sharePerGoal * (activeGoals.length - 1))
+                : sharePerGoal;
+            
             final updatedGoal = SavingsGoal(
               id: goal.id,
               name: goal.name,
               targetAmount: goal.targetAmount,
-              currentAmount: goal.currentAmount + share,
+              currentAmount: goal.currentAmount + amountToAdd,
               targetDate: goal.targetDate,
               category: goal.category,
               icon: goal.icon,
@@ -379,6 +591,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       return '${isNegative ? '-' : ''}QAR${(abs / 1000).toStringAsFixed(1)}k';
     }
     return '${isNegative ? '-' : ''}QAR${abs.toStringAsFixed(2)}';
+  }
+
+  String _getMonthName(int month) {
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return months[month - 1];
   }
 
   (DateTime, DateTime) _getDateRange() {
@@ -463,6 +680,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   width: double.infinity,
                   child: ElevatedButton(
                     onPressed: () {
+                      _saveDateRangePreferences();
                       setState(() {});
                       Navigator.pop(context);
                       _loadData();
@@ -683,6 +901,17 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               );
             }
           },
+          onLongPress: () async {
+            await _smsHistoryService.debugRawSmsQuery();
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Debug query done — check logs'),
+                  duration: Duration(seconds: 2),
+                ),
+              );
+            }
+          },
           child: Container(
             padding: const EdgeInsets.all(10),
             decoration:
@@ -691,6 +920,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 const Icon(Icons.sync, color: AppTheme.textSecondary, size: 22),
           ),
         ),
+        const SizedBox(width: 8),
+        _buildVerificationButton(),
         const SizedBox(width: 8),
         _buildIconButton(Icons.notifications_outlined, () {}),
         const SizedBox(width: 8),
@@ -712,13 +943,59 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
+  Widget _buildVerificationButton() {
+    return GestureDetector(
+      onTap: () => _navigateTo(const TransactionVerificationScreen()),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: AppTheme.glassDecoration(opacity: 0.06, borderRadius: 12),
+            child: Icon(
+              Icons.verified_user_outlined,
+              color: _unverifiedCount > 0 ? AppTheme.accentOrange : AppTheme.textSecondary,
+              size: 22,
+            ),
+          ),
+          if (_unverifiedCount > 0)
+            Positioned(
+              right: -4,
+              top: -4,
+              child: Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: AppTheme.accentOrange,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                constraints: const BoxConstraints(
+                  minWidth: 16,
+                  minHeight: 16,
+                ),
+                child: Text(
+                  _unverifiedCount > 99 ? '99+' : _unverifiedCount.toString(),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   // ─── Balance Card ──────────────────────────────────────────
   Widget _buildBalanceCard() {
-    // Calculate remaining budget (monthly focus)
     final remainingBudget = _monthlyIncome - _spentAmount;
     final savingsPercentage = _monthlyIncome > 0
         ? ((remainingBudget / _monthlyIncome) * 100).toInt()
         : 0;
+    final now = DateTime.now();
+    final monthLabel = '${_getMonthName(now.month)} ${now.year}';
 
     return Container(
       width: double.infinity,
@@ -741,6 +1018,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Total Balance — prominent
           Row(
             children: [
               Container(
@@ -749,43 +1027,53 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   color: Colors.white.withOpacity(0.2),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Icon(
-                    savingsPercentage >= 20
-                        ? Icons.savings_rounded
-                        : Icons.pie_chart_rounded,
-                    color: Colors.white,
-                    size: 18),
+                child: const Icon(Icons.account_balance_wallet_rounded,
+                    color: Colors.white, size: 18),
               ),
               const SizedBox(width: 10),
-              Text('Monthly Overview',
+              Text('Total Balance',
                   style: TextStyle(
                       color: Colors.white.withOpacity(0.9),
                       fontSize: 14,
                       fontWeight: FontWeight.w500)),
-              const Spacer(),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'QAR ${_totalBalance.toStringAsFixed(2)}',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 36,
+              fontWeight: FontWeight.bold,
+              letterSpacing: -1,
+            ),
+          ),
+          const SizedBox(height: 24),
+
+          // Monthly section divider
+          Row(
+            children: [
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
                   color: Colors.black.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(8),
                 ),
-                child: Row(
-                  children: [
-                    Text('Total: ', style: TextStyle(color: Colors.white70, fontSize: 12)),
-                    Text(
-                      'QAR ${_totalBalance.toStringAsFixed(0)}',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 13,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
+                child: Text(monthLabel,
+                    style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600)),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Container(height: 1, color: Colors.white.withOpacity(0.15)),
               ),
             ],
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
+
+          // Monthly Income / Expenses
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -907,10 +1195,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             children: [
               Expanded(
                 child: _buildBudgetStats(
-                  icon: Icons.account_balance_wallet_rounded,
-                  label: 'Budget'
-                      '${remainingBudget >= 0 ? ' Remaining' : ' Used'}',
-                  amount: 'QAR${remainingBudget.abs().toStringAsFixed(2)}',
+                  icon: Icons.savings_rounded,
+                  label: 'Monthly Savings',
+                  amount: 'QAR${remainingBudget.toStringAsFixed(0)}',
                   color: remainingBudget >= 0
                       ? AppTheme.accentGreen
                       : AppTheme.accentRed,
@@ -919,11 +1206,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               const SizedBox(width: 12),
               Expanded(
                 child: _buildBudgetStats(
-                  icon: Icons.track_changes_rounded,
-                  label: 'Your Goal',
-                  amount:
-                      '${savingsPercentage > 25 ? "Excellent!" : savingsPercentage > 10 ? "Getting There!" : "Push More!"}',
-                  color: AppTheme.primaryLight,
+                  icon: Icons.percent_rounded,
+                  label: 'Savings Rate',
+                  amount: '${savingsPercentage > 0 ? savingsPercentage : 0}%',
+                  color: savingsPercentage >= 25
+                      ? AppTheme.accentGreen
+                      : savingsPercentage >= 10
+                          ? AppTheme.accentOrange
+                          : AppTheme.accentRed,
                 ),
               ),
             ],
@@ -1074,7 +1364,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         _buildStatChip(
           icon: Icons.receipt_long_rounded,
           label: 'Txns',
-          value: '${_recentTransactions.length}',
+          value: '$_monthlyTransactionCount',
           color: AppTheme.accent,
         ),
       ],
@@ -1098,7 +1388,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           children: [
             const Text('Budget Progress', style: AppTheme.heading3),
             Text(
-              '${activeBudgets.length} categories',
+              activeBudgets.length == 1 ? '1 category' : '${activeBudgets.length} categories',
               style: AppTheme.caption,
             ),
           ],
@@ -1289,7 +1579,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       _buildActionItem(
-                        Icons.receipt_long_rounded,
+                        Icons.calendar_today_rounded,
                         'Bills',
                         AppTheme.accentOrange,
                         () => _navigateTo(const BillRemindersScreen()),
@@ -1327,7 +1617,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     () => _navigateTo(const GoalsScreen()),
                   ),
                   _buildActionItem(
-                    Icons.receipt_long_rounded,
+                    Icons.calendar_today_rounded,
                     'Bills',
                     AppTheme.accentOrange,
                     () => _navigateTo(const BillRemindersScreen()),
@@ -1420,17 +1710,27 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       return Container(
         padding: const EdgeInsets.all(32),
         decoration: AppTheme.cardDecoration,
-        child: const Center(
+        child: Center(
           child: Column(
             children: [
               Icon(Icons.receipt_long_outlined,
                   size: 48, color: AppTheme.textTertiary),
-              SizedBox(height: 12),
-              Text('No transactions yet',
+              const SizedBox(height: 12),
+              const Text('No transactions yet',
                   style: TextStyle(color: AppTheme.textSecondary)),
-              SizedBox(height: 4),
-              Text('Your transactions will appear here',
+              const SizedBox(height: 4),
+              const Text('Add your first transaction to get started',
                   style: AppTheme.caption),
+              const SizedBox(height: 16),
+              ElevatedButton.icon(
+                onPressed: () => _navigateTo(const AddTransactionScreen()),
+                icon: const Icon(Icons.add_rounded),
+                label: const Text('Add Transaction'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primary,
+                  foregroundColor: Colors.white,
+                ),
+              ),
             ],
           ),
         ),
@@ -1625,16 +1925,27 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       return Container(
         padding: const EdgeInsets.all(32),
         decoration: AppTheme.cardDecoration,
-        child: const Center(
+        child: Center(
           child: Column(
             children: [
               Icon(Icons.savings_outlined,
                   size: 48, color: AppTheme.textTertiary),
-              SizedBox(height: 12),
-              Text('No savings goals yet',
+              const SizedBox(height: 12),
+              const Text('No savings goals yet',
                   style: TextStyle(color: AppTheme.textSecondary)),
-              SizedBox(height: 4),
-              Text('Tap + to create your first goal', style: AppTheme.caption),
+              const SizedBox(height: 4),
+              const Text('Create your first goal to start saving towards something',
+                  style: AppTheme.caption),
+              const SizedBox(height: 16),
+              ElevatedButton.icon(
+                onPressed: () => _navigateTo(const GoalsScreen()),
+                icon: const Icon(Icons.add_rounded),
+                label: const Text('Create Goal'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.accentGreen,
+                  foregroundColor: Colors.white,
+                ),
+              ),
             ],
           ),
         ),

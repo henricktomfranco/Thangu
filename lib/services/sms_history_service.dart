@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -21,11 +22,14 @@ class SmsHistoryService {
   final AccountService _accountService = AccountService();
   Timer? _scanTimer;
   Timer? _categorizeTimer;
+  bool _isScanning = false;
 
   /// Start all background tasks
   void startBackgroundScanning() {
-    // Immediate scan when started
-    scanNewSms(useAI: true);
+    // Do NOT scan immediately here — _loadData() in HomeScreen handles the
+    // initial scan with proper permission checks and isFirstLoad logic.
+    // Starting a scan here would race with _loadData() and block it via the
+    // _isScanning guard.
 
     _scanTimer?.cancel();
     _scanTimer = Timer.periodic(const Duration(minutes: 5), (_) {
@@ -47,11 +51,52 @@ class SmsHistoryService {
     _categorizeTimer = null;
   }
 
+  /// Reset the scan guard (use if stuck from previous crash)
+  void resetScanGuard() {
+    _isScanning = false;
+    print('[SmsHistory] Scan guard reset');
+  }
+
   /// Force scan for new SMS immediately
   Future<int> forceScanSms({bool useAI = true}) async {
     print('[SmsHistory] Force scanning for new SMS...');
     return await scanNewSms(useAI: useAI);
   }
+
+  /// Debug: query Android directly for all inbox SMS, no filtering
+  Future<List<dynamic>?> debugRawSmsQuery() async {
+    try {
+      print('[SmsHistory] 🔍 DEBUG: Raw SMS query...');
+      final result = await _channel.invokeMethod('loadHistoricalSms', {
+        'limitDays': 90,
+      }).timeout(const Duration(seconds: 15));
+
+      if (result == null) {
+        print('[SmsHistory] 🔍 DEBUG: Android returned null');
+        return null;
+      }
+
+      final List<dynamic> smsList = result as List<dynamic>;
+      print('[SmsHistory] 🔍 DEBUG: Android returned ${smsList.length} SMS');
+
+      for (int i = 0; i < smsList.length && i < 10; i++) {
+        final msg = smsList[i] as Map<dynamic, dynamic>;
+        final body = msg['body'] as String? ?? '';
+        final sender = msg['sender'] as String? ?? 'Unknown';
+        final isFin = _isFinancialSms(body);
+        print('[SmsHistory] 🔍 SMS[$i] from=$sender financial=$isFin');
+        print('[SmsHistory] 🔍   body=${body.substring(0, body.length < 120 ? body.length : 120)}');
+      }
+
+      return smsList;
+    } catch (e) {
+      print('[SmsHistory] 🔍 DEBUG error: $e');
+      return null;
+    }
+  }
+
+  /// Public wrapper for _isFinancialSms (for debug screen)
+  bool isFinancialSmsForDebug(String body) => _isFinancialSms(body);
 
   /// Check and send budget alerts after a transaction is saved
   Future<void> _checkBudgetAlerts(String category) async {
@@ -61,7 +106,12 @@ class SmsHistoryService {
 
       for (final budget in budgets) {
         if (budget.category == category && budget.enabled) {
-          final txns = await _dbService.getTransactions();
+          // Fetch only transactions within the budget's period for this category
+          final txns = await _dbService.getTransactions(
+            startDate: budget.periodStart,
+            endDate: budget.periodEnd,
+            limit: 2000,
+          );
           final categorySpent = txns
               .where((t) => t.category == category && t.type != 'credit')
               .fold(0.0, (sum, t) => sum + t.amount);
@@ -131,28 +181,22 @@ class SmsHistoryService {
 
   /// Scan for new SMS messages only (since last scan)
   Future<int> scanNewSms({bool useAI = true}) async {
+    if (_isScanning) {
+      print('[SmsHistory] ⊘ Scan already in progress, skipping');
+      return 0;
+    }
+
     try {
-      final prefs = await SharedPreferences.getInstance();
+      print('[SmsHistory] Scanning for NEW SMS messages only...');
+      
+      // Use ID-based filtering - only get SMS with ID > last processed
+      final count = await loadHistoricalSms(
+        lastDays: 90,
+        useAI: useAI,
+        isFirstLoad: false,
+      );
 
-      // Issue 2: Use stored last_scan_timestamp rather than last DB transaction date
-      final lastScanMs = prefs.getInt('last_sms_scan_timestamp');
-      int daysToScan;
-
-      if (lastScanMs != null) {
-        final lastScan = DateTime.fromMillisecondsSinceEpoch(lastScanMs);
-        final diff = DateTime.now().difference(lastScan).inDays;
-        daysToScan = (diff + 1).clamp(1, 3); // min 1 day, max 3 days
-      } else {
-        daysToScan = 2;
-      }
-
-      print('[SmsHistory] Scanning last $daysToScan days of SMS messages');
-      final count = await loadHistoricalSms(lastDays: daysToScan, useAI: useAI);
-
-      // Save scan timestamp
-      await prefs.setInt(
-          'last_sms_scan_timestamp', DateTime.now().millisecondsSinceEpoch);
-
+      print('[SmsHistory] ✓ Scanned $count new SMS messages');
       return count;
     } catch (e) {
       print('[SmsHistory] Error scanning new SMS: $e');
@@ -176,6 +220,12 @@ class SmsHistoryService {
         lowerBody.contains('كود') ||
         lowerBody.contains('one time') ||
         lowerBody.contains('do not share')) {
+      return false;
+    }
+
+    // Balance enquiry detection: skip SMS that ONLY contain balance info
+    // with no transaction action words
+    if (_isBalanceEnquiryOnly(lowerBody)) {
       return false;
     }
 
@@ -235,6 +285,30 @@ class SmsHistoryService {
     return false;
   }
 
+  /// Detect balance enquiry SMS that should be skipped
+  /// These SMS contain ONLY balance info with no transaction action
+  bool _isBalanceEnquiryOnly(String lowerBody) {
+    // If SMS has NO transaction action words, it's likely a balance enquiry
+    final transactionActions = [
+      'spent', 'purchase', 'paid', 'debited', 'credited',
+      'withdraw', 'deposit', 'transfer', 'sent', 'received',
+      'refund', 'cashback', 'salary', 'used for',
+      'صرف', 'دفع', 'شراء', 'إيداع', 'سحب', 'تحويل',
+    ];
+
+    final hasTransactionAction = transactionActions.any(lowerBody.contains);
+    if (hasTransactionAction) return false; // Has action, not a balance enquiry
+
+    // Check if it's ONLY balance info
+    final hasBalanceKeyword = lowerBody.contains('balance') ||
+        lowerBody.contains('bal:') ||
+        lowerBody.contains('avail') ||
+        lowerBody.contains('الرصيد');
+
+    // If it has balance keyword but NO transaction action, skip it
+    return hasBalanceKeyword;
+  }
+
   /// Load historical SMS messages and save to database
   Future<int> loadHistoricalSms({
     dynamic lastDays,
@@ -242,6 +316,12 @@ class SmsHistoryService {
     bool useAI = true,
     bool isFirstLoad = false,
   }) async {
+    if (_isScanning) {
+      print('[SmsHistory] ⊘ Scan already in progress, skipping');
+      return 0;
+    }
+
+    _isScanning = true;
     try {
       if (useAI) {
         await _aiService.initialize();
@@ -258,12 +338,25 @@ class SmsHistoryService {
 
       print('[SmsHistory] Requesting SMS from last $limitDays days');
 
+      // Get last processed SMS ID for ID-based filtering (subsequent scans)
+      String? lastSmsId;
+      if (!isFirstLoad) {
+        lastSmsId = await _dbService.getLastProcessedSmsId();
+        print('[SmsHistory] Last processed SMS ID: $lastSmsId');
+      }
+
       // Issue 5: longer timeout on first load (90 days of SMS can be large)
       final timeoutSeconds = isFirstLoad ? 30 : 10;
 
-      final result = await _channel.invokeMethod('loadHistoricalSms', {
+      // Pass lastSmsId to Android for ID-based filtering
+      final Map<String, dynamic> queryParams = {
         'limitDays': limitDays,
-      }).timeout(
+      };
+      if (lastSmsId != null) {
+        queryParams['lastSmsId'] = int.tryParse(lastSmsId);
+      }
+
+      final result = await _channel.invokeMethod('loadHistoricalSms', queryParams).timeout(
         Duration(seconds: timeoutSeconds),
         onTimeout: () {
           print(
@@ -281,14 +374,18 @@ class SmsHistoryService {
       print(
           '[SmsHistory] Received ${smsList.length} SMS messages from platform');
 
-      if (smsList.isEmpty) return 0;
+      if (smsList.isEmpty) {
+        print('[SmsHistory] ⚠ Android returned 0 SMS messages');
+        return 0;
+      }
 
       int savedCount = 0;
-
-      // Fetch existing transactions once for dedup (instead of per-SMS)
-      final existingTxn = isFirstLoad
-          ? <Transaction>[]
-          : await _dbService.getTransactions(limit: 500);
+      int emptySkipped = 0;
+      int duplicateSkipped = 0;
+      int nonFinancialSkipped = 0;
+      int errorSkipped = 0;
+      String? highestSmsId;
+      List<String> nonFinancialSamples = [];
 
       for (int i = 0; i < smsList.length; i++) {
         final smsData = smsList[i];
@@ -297,42 +394,65 @@ class SmsHistoryService {
           final body = message['body'] as String? ?? '';
           final sender = message['sender'] as String? ?? 'Unknown';
           final timestamp = message['timestamp'] as int? ?? 0;
+          final smsId = message['sms_id']?.toString();
 
-          if (body.isEmpty) continue;
-
-          // Issue 4: sync call now (no await needed)
-          final isFinancial = _isFinancialSms(body);
-          if (!isFinancial) {
-            print(
-                '[SmsHistory] ⊘ Skipped non-financial SMS from $sender: ${body.substring(0, min(body.length, 40))}...');
-            continue;
-          }
-
-          // Issue 1: improved duplicate check — use timestamp + sender, not body content
-          if (!isFirstLoad) {
-            final smsDate = DateTime.fromMillisecondsSinceEpoch(timestamp);
-            final isDuplicate = existingTxn.any(
-              (t) =>
-                  t.sender == _sanitizeSender(sender) &&
-                  t.date.difference(smsDate).abs() < const Duration(minutes: 2),
-            );
-
-            if (isDuplicate && !overwrite) {
-              print('[SmsHistory] Duplicate SMS skipped (timestamp+sender match)');
-              continue;
+          // Track highest SMS ID for next scan
+          if (smsId != null) {
+            if (highestSmsId == null || 
+                (int.tryParse(smsId) ?? 0) > (int.tryParse(highestSmsId) ?? 0)) {
+              highestSmsId = smsId;
             }
           }
 
+          if (body.isEmpty) {
+            emptySkipped++;
+            continue;
+          }
+
+          // Generate hash-based fingerprint for deduplication
+          final fingerprint = _generateSmsFingerprint(body, sender, timestamp);
+
+          // Check if SMS was already processed (by ID or fingerprint)
+          final alreadyById = smsId != null && await _dbService.isSmsProcessed(smsId);
+          final alreadyByHash = await _dbService.isSmsProcessed(fingerprint);
+          if ((alreadyById || alreadyByHash) && !overwrite) {
+            duplicateSkipped++;
+            continue;
+          }
+
+          // Check if transaction is financial
+          final isFinancial = _isFinancialSms(body);
+          if (!isFinancial) {
+            nonFinancialSkipped++;
+            if (nonFinancialSamples.length < 5) {
+              nonFinancialSamples.add('[$sender] ${body.substring(0, body.length < 80 ? body.length : 80)}');
+            }
+            continue;
+          }
+
           // Parse SMS content
-          // Issue 6: append loop index to prevent ID collision in same millisecond
-          final transaction = _parseSms(body, sender, timestamp, index: i);
+          final transaction = _parseSms(body, sender, timestamp, index: i, smsId: smsId);
 
           if (useAI) {
             await _categorizeTransaction(transaction);
           }
 
-          await _dbService.insertTransaction(transaction);
-          savedCount++;
+          // Atomic insert + SMS tracking (use fingerprint as primary key)
+          try {
+            await _dbService.insertTransactionWithSmsTracking(transaction, fingerprint);
+            savedCount++;
+          } catch (insertError) {
+            errorSkipped++;
+            print('[SmsHistory] ✗ INSERT FAILED for SMS from $sender: $insertError');
+            // Try inserting without SMS tracking as fallback
+            try {
+              await _dbService.insertTransaction(transaction);
+              savedCount++;
+              print('[SmsHistory]   ✓ Fallback insert succeeded');
+            } catch (fallbackError) {
+              print('[SmsHistory]   ✗ Fallback insert also failed: $fallbackError');
+            }
+          }
 
           if (!isFirstLoad) {
             await _checkBudgetAlerts(transaction.category);
@@ -342,13 +462,28 @@ class SmsHistoryService {
           print(
               '[SmsHistory] ✓ Saved transaction #$savedCount: ${transaction.description}');
         } catch (e) {
+          errorSkipped++;
           print('[SmsHistory] ✗ Error processing SMS message: $e');
           continue;
         }
       }
 
-      print(
-          '[SmsHistory] ✓ Successfully saved $savedCount transactions to database');
+      // Print summary
+      print('[SmsHistory] ═══════════════════════════════════════');
+      print('[SmsHistory] SMS Scan Summary:');
+      print('[SmsHistory]   Total from Android: ${smsList.length}');
+      print('[SmsHistory]   Empty skipped: $emptySkipped');
+      print('[SmsHistory]   Duplicates skipped: $duplicateSkipped');
+      print('[SmsHistory]   Non-financial skipped: $nonFinancialSkipped');
+      print('[SmsHistory]   Errors skipped: $errorSkipped');
+      print('[SmsHistory]   ✓ Saved: $savedCount');
+      if (nonFinancialSamples.isNotEmpty) {
+        print('[SmsHistory] Non-financial samples (first $nonFinancialSamples.length):');
+        for (final sample in nonFinancialSamples) {
+          print('[SmsHistory]   $sample');
+        }
+      }
+      print('[SmsHistory] ═══════════════════════════════════════');
       return savedCount;
     } on PlatformException catch (e) {
       print('[SmsHistory] ✗ Platform error: ${e.code}');
@@ -357,91 +492,259 @@ class SmsHistoryService {
     } catch (e) {
       print('[SmsHistory] ✗ Unexpected error: $e');
       return 0;
+    } finally {
+      _isScanning = false;
     }
   }
 
   /// Parse SMS content into Transaction object
   Transaction _parseSms(String body, String sender, int timestamp,
-      {int index = 0}) {
+      {int index = 0, String? smsId}) {
     final date = DateTime.fromMillisecondsSinceEpoch(timestamp);
+    final merchantInfo = _extractMerchantInfo(body);
 
-    // Issue 6: include index to avoid ID collisions when multiple SMS arrive same ms
     final transaction = Transaction(
       id: '${timestamp}_${index}_hist',
       amount: _extractAmount(body),
       type: _extractType(body),
       category: 'Pending',
-      description: _extractMerchantName(body),
+      description: merchantInfo.description,
+      merchant: merchantInfo.merchant,
       date: date,
       sender: _sanitizeSender(sender),
       isCategorizedByAI: false,
       aiConfidence: 0.0,
+      smsId: smsId,
     );
 
     return _accountService.attachAccountInfo(transaction, body);
   }
 
-  /// Extract clean merchant name from SMS
-  String _extractMerchantName(String smsBody) {
-    final patterns = [
-      RegExp(r'at\s+([A-Z\s\d]+?)(?:\sat\s|Balance:|Enquiry|$)',
-          multiLine: true),
-      RegExp(
-          r'used\s+for[^\s]+\s+(?:QAR|AED|SAR|INR|Rs\.?|USD|EUR|GBP|₹|€|£)[^\s]*\s+([A-Z\s\d]+?)(?:\sat\s|Balance:|Enquiry|$)'),
-      RegExp(r'([A-Z][A-Z\s\d]{3,50}?)(?:\sat\s|Balance:|Enquiry|$)'),
-    ];
-
-    for (final pattern in patterns) {
-      final match = pattern.firstMatch(smsBody);
-      if (match != null && match.groupCount > 0) {
-        String merchant = match.group(1)?.trim() ?? '';
-        if (merchant.isNotEmpty && merchant.length > 3) {
-          merchant = merchant
-              .replaceAll(RegExp(r'\s+at\s*$'), '')
-              .replaceAll(RegExp(r'\s+Balance.*$'), '')
-              .trim();
-          if (merchant.isNotEmpty) return merchant;
-        }
+  /// Extract both merchant name and clean description from SMS
+  ({String? merchant, String description}) _extractMerchantInfo(String smsBody) {
+    // Priority 1: "at MERCHANT NAME" pattern (most common for Qatari banks)
+    final atPattern = RegExp(r'at\s+([A-Z][A-Za-z\s\d\.\-]{2,40}?)(?:\s+at\s|\s+Balance:|\s+Enquiry|\s+at\s+\d|Enquiry\s+\d|$)', multiLine: true);
+    var match = atPattern.firstMatch(smsBody);
+    if (match != null && match.groupCount > 0) {
+      String merchant = match.group(1)?.trim() ?? '';
+      merchant = _cleanMerchantName(merchant);
+      if (merchant.isNotEmpty && merchant.length > 2) {
+        return (merchant: merchant, description: _buildDescription(smsBody, merchant));
       }
     }
 
+    // Priority 2: "used for QAR X at MERCHANT" pattern
+    final usedPattern = RegExp(r'used\s+for[^\s]+\s+(?:QAR|AED|SAR|INR|Rs\.?|USD|EUR|GBP|₹|€|£)[^\s]*\s+([A-Z][A-Za-z\s\d\.\-]{2,40}?)(?:\s+at\s|\s+Balance:|\s+Enquiry|\s+at\s+\d|Enquiry\s+\d|$)', multiLine: true);
+    match = usedPattern.firstMatch(smsBody);
+    if (match != null && match.groupCount > 0) {
+      String merchant = match.group(1)?.trim() ?? '';
+      merchant = _cleanMerchantName(merchant);
+      if (merchant.isNotEmpty && merchant.length > 2) {
+        return (merchant: merchant, description: _buildDescription(smsBody, merchant));
+      }
+    }
+
+    // Priority 3: "POS purchase at MERCHANT" or "Online purchase at MERCHANT"
+    final purchasePattern = RegExp(r'(?:POS|online|purchase|payment)\s+(?:at\s+)?([A-Z][A-Za-z\s\d\.\-]{2,40}?)(?:\s+at\s|\s+Balance:|\s+Enquiry|\s+for\s|$)', multiLine: true);
+    match = purchasePattern.firstMatch(smsBody);
+    if (match != null && match.groupCount > 0) {
+      String merchant = match.group(1)?.trim() ?? '';
+      merchant = _cleanMerchantName(merchant);
+      if (merchant.isNotEmpty && merchant.length > 2) {
+        return (merchant: merchant, description: _buildDescription(smsBody, merchant));
+      }
+    }
+
+    // Fallback: no merchant found, use cleaned description
+    return (merchant: null, description: _buildFallbackDescription(smsBody));
+  }
+
+  /// Clean extracted merchant name
+  String _cleanMerchantName(String name) {
+    return name
+        .replaceAll(RegExp(r'\s+at\s*$'), '')
+        .replaceAll(RegExp(r'\s+Balance.*$'), '')
+        .replaceAll(RegExp(r'\s+Enquiry.*$'), '')
+        .replaceAll(RegExp(r'\s+\d{1,2}:\d{2}\s*$'), '') // Remove trailing time
+        .replaceAll(RegExp(r'\s+$'), '')
+        .trim();
+  }
+
+  /// Build clean description using merchant name
+  String _buildDescription(String smsBody, String merchant) {
+    // Extract transaction type context
+    final lower = smsBody.toLowerCase();
+    String context = '';
+    if (lower.contains('spent') || lower.contains('debited')) {
+      context = 'Payment';
+    } else if (lower.contains('credited') || lower.contains('received')) {
+      context = 'Received';
+    } else if (lower.contains('transfer')) {
+      context = 'Transfer';
+    } else if (lower.contains('withdraw')) {
+      context = 'Withdrawal';
+    }
+
+    if (context.isNotEmpty) {
+      return '$context at $merchant';
+    }
+    return merchant;
+  }
+
+  /// Build fallback description when no merchant is found
+  String _buildFallbackDescription(String smsBody) {
+    // Remove sensitive info
     String cleaned = smsBody.replaceAll(
       RegExp(r'(OTP|PIN|CVV|ATM)[\:\s]+[\w\d]+', caseSensitive: false),
       '[REDACTED]',
     );
-    if (cleaned.length > 50) {
-      cleaned = cleaned.substring(0, 50).trim() + '...';
+    // Remove balance/enquiry info
+    cleaned = cleaned.replaceAll(RegExp(r'\s*Balance:.*$', multiLine: true), '');
+    cleaned = cleaned.replaceAll(RegExp(r'\s*Enquiry.*$', multiLine: true), '');
+    if (cleaned.length > 60) {
+      cleaned = cleaned.substring(0, 60).trim() + '...';
     }
-    return cleaned.isEmpty ? 'Transaction' : cleaned;
+    return cleaned.isEmpty ? 'Transaction' : cleaned.trim();
   }
 
   /// Extract amount from SMS — unified to support all currencies
   double _extractAmount(String smsBody) {
     try {
-      // Issue 3: expanded to cover QR. format and Arabic digits
-      final RegExp regExp = RegExp(
+      // Normalize Arabic digits to Western digits first
+      final normalizedBody = _normalizeArabicDigits(smsBody);
+
+      // Pattern to find all currency-prefixed amounts with their surrounding context
+      final currencyPattern = RegExp(
         r'(?:Rs\.?|INR|₹|QAR|QR\.?|AED|SAR|USD|\$|EUR|€|GBP|£)\s*([0-9,]+\.?[0-9]*)',
         caseSensitive: false,
       );
-      final Match? match = regExp.firstMatch(smsBody);
-      if (match != null) {
-        String amountStr = match.group(1) ?? '0';
-        amountStr = amountStr.replaceAll(',', '');
-        return double.parse(amountStr);
+
+      final matches = currencyPattern.allMatches(normalizedBody).toList();
+      if (matches.isEmpty) {
+        return _fallbackExtractAmount(normalizedBody);
       }
 
-      final RegExp fallbackRegExp = RegExp(r'([0-9]{2,}(?:\.[0-9]{2})?)\b');
-      final Match? fallbackMatch = fallbackRegExp.firstMatch(smsBody);
-      if (fallbackMatch != null) {
-        String amountStr = fallbackMatch.group(1) ?? '0';
-        amountStr = amountStr.replaceAll(',', '');
-        final amount = double.parse(amountStr);
-        if (amount > 0.1 && amount < 1000000) return amount;
+      // If only one amount found, use it
+      if (matches.length == 1) {
+        return _parseAmountStr(matches.first.group(1) ?? '0');
       }
+
+      // Multiple amounts: find the transaction amount (not balance)
+      // Strategy: look for amounts near transaction keywords, exclude balance amounts
+      for (final match in matches) {
+        final startIdx = match.start;
+        // Look at ~80 chars before the match for context
+        final contextStart = startIdx > 80 ? startIdx - 80 : 0;
+        final context = normalizedBody.substring(contextStart, startIdx).toLowerCase();
+
+        // Skip if this amount is clearly a balance
+        if (_isBalanceContext(context)) {
+          continue;
+        }
+
+        // Prefer amounts near transaction keywords
+        if (_isTransactionContext(context)) {
+          return _parseAmountStr(match.group(1) ?? '0');
+        }
+      }
+
+      // No transaction-specific amount found, return first non-balance amount
+      for (final match in matches) {
+        final startIdx = match.start;
+        final contextStart = startIdx > 80 ? startIdx - 80 : 0;
+        final context = normalizedBody.substring(contextStart, startIdx).toLowerCase();
+
+        if (!_isBalanceContext(context)) {
+          return _parseAmountStr(match.group(1) ?? '0');
+        }
+      }
+
+      // Last resort: if there are exactly 2 amounts, pick the smaller one
+      // (transaction amount is usually smaller than balance)
+      if (matches.length == 2) {
+        final amt1 = _parseAmountStr(matches.first.group(1) ?? '0');
+        final amt2 = _parseAmountStr(matches.last.group(1) ?? '0');
+        return amt1 < amt2 ? amt1 : amt2;
+      }
+
+      // Absolute last resort: return the first amount
+      return _parseAmountStr(matches.first.group(1) ?? '0');
     } catch (e) {
       print('[SmsHistory] Error extracting amount: $e');
     }
     return 0.0;
+  }
+
+  /// Normalize Arabic digits (٠-٩) to Western digits (0-9)
+  String _normalizeArabicDigits(String text) {
+    return text
+        .replaceAll('٠', '0')
+        .replaceAll('١', '1')
+        .replaceAll('٢', '2')
+        .replaceAll('٣', '3')
+        .replaceAll('٤', '4')
+        .replaceAll('٥', '5')
+        .replaceAll('٦', '6')
+        .replaceAll('٧', '7')
+        .replaceAll('٨', '8')
+        .replaceAll('٩', '9');
+  }
+
+  /// Check if context indicates a balance amount (not a transaction)
+  bool _isBalanceContext(String context) {
+    return context.contains('balance') ||
+        context.contains('bal:') ||
+        context.contains('bal ') ||
+        context.contains('available') ||
+        context.contains('closing bal') ||
+        context.contains('current bal') ||
+        context.contains('avail bal') ||
+        context.contains('الرصيد');
+  }
+
+  /// Check if context indicates a transaction amount
+  bool _isTransactionContext(String context) {
+    return context.contains('spent') ||
+        context.contains('debited') ||
+        context.contains('paid') ||
+        context.contains('used for') ||
+        context.contains('purchase') ||
+        context.contains('payment') ||
+        context.contains('transfer') ||
+        context.contains('withdraw') ||
+        context.contains('credited') ||
+        context.contains('deposited') ||
+        context.contains('sent') ||
+        context.contains('received') ||
+        context.contains('refund') ||
+        context.contains('salary') ||
+        context.contains('cashback') ||
+        context.contains('صرف') ||
+        context.contains('دفع') ||
+        context.contains('شراء');
+  }
+
+  /// Fallback amount extraction when no currency prefix found
+  double _fallbackExtractAmount(String smsBody) {
+    // Only match numbers that look like monetary amounts:
+    // - Must have exactly 2 decimal places (e.g., "123.45") OR
+    // - Be 2-5 digits without decimals (small amounts)
+    // This excludes card numbers (4+ digits), phone numbers, dates, reference numbers
+    final RegExp amountPattern = RegExp(r'(?<!\d)(\d{2,5}\.\d{2})(?!\d)');
+    final Match? match = amountPattern.firstMatch(smsBody);
+    if (match != null) {
+      String amountStr = match.group(1) ?? '0';
+      amountStr = amountStr.replaceAll(',', '');
+      final amount = double.parse(amountStr);
+      if (amount > 0.01 && amount < 100000) return amount;
+    }
+    return 0.0;
+  }
+
+  /// Parse amount string removing commas
+  double _parseAmountStr(String amountStr) {
+    final cleaned = amountStr.replaceAll(',', '');
+    return double.parse(cleaned);
   }
 
   /// Determine transaction type
@@ -608,5 +911,18 @@ class SmsHistoryService {
     return 'Other';
   }
 
-  int min(int a, int b) => a < b ? a : b;
+  /// Generate hash-based fingerprint for SMS deduplication
+  /// Uses composite key: sender + timestamp + first 50 chars of body
+  String _generateSmsFingerprint(String body, String sender, int timestamp) {
+    final bodyPreview = body.length > 50 ? body.substring(0, 50) : body;
+    final data = '${sender}_${timestamp}_${bodyPreview}';
+    final bytes = utf8.encode(data);
+    // FNV-1a hash
+    int hash = 0x811c9dc5;
+    for (final byte in bytes) {
+      hash ^= byte;
+      hash = (hash * 0x01000193) & 0xFFFFFFFF;
+    }
+    return 'sms_${hash.toRadixString(16).padLeft(8, '0')}';
+  }
 }

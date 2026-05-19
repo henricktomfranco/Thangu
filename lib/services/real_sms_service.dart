@@ -14,17 +14,12 @@ class RealSmsService {
   final AiService _aiService = AiService();
 
   // Method to start listening for SMS transactions
+  // NOTE: Fake transaction generation removed to prevent database pollution.
+  // Real SMS handling is done by EnhancedSmsService and SmsHistoryService.
   Future<void> startListeningForTransactions() async {
-    // In a real implementation, this would:
-    // 1. Request SMS permissions
-    // 2. Register a broadcast receiver for incoming SMS
-    // 3. Parse transaction SMS messages
-
-    // For demonstration, we'll simulate this with a timer
-    Timer.periodic(const Duration(seconds: 30), (timer) {
-      // In a real app, this would be triggered by actual SMS events
-      _processIncomingSms();
-    });
+    // Intentionally left empty — real SMS processing is handled by
+    // EnhancedSmsService (real-time) and SmsHistoryService (historical).
+    // Do not add timer-based fake transactions here.
   }
 
   // Method to process incoming SMS and create transactions
