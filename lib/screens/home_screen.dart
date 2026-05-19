@@ -6,6 +6,8 @@ import 'package:thangu/services/account_service.dart';
 import 'package:thangu/services/sms_history_service.dart';
 import 'package:thangu/services/enhanced_sms_service.dart';
 import 'package:thangu/services/permission_service.dart';
+import 'package:thangu/services/proactive_ai_service.dart';
+import 'package:thangu/services/safe_to_spend_calculator.dart';
 import 'dart:async';
 import '../app_theme.dart';
 import '../services/database_service.dart';
@@ -21,6 +23,8 @@ import 'settings_screen.dart';
 import 'budget_settings_screen.dart';
 import 'bill_reminders_screen.dart';
 import 'transaction_verification_screen.dart';
+import 'subscriptions_screen.dart';
+import 'onboarding_screen.dart';
 
 enum DateRangeType { thisMonth, last30Days, custom }
 
@@ -36,6 +40,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   final AccountService _accountService = AccountService();
   final SmsHistoryService _smsHistoryService = SmsHistoryService();
   final EnhancedSmsService _enhancedSmsService = EnhancedSmsService();
+  final ProactiveAiService _proactiveAi = ProactiveAiService();
+  final SafeToSpendCalculator _safeToSpendCalc = SafeToSpendCalculator();
   StreamSubscription? _smsSubscription;
 
   List<app_txn.Transaction> _recentTransactions = [];
@@ -52,12 +58,16 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   int _monthlyTransactionCount = 0;
   int _unverifiedCount = 0;
   bool _isLoading = true;
+  String? _aiInsight;
   int _currentNavIndex = 0;
   DateTime _lastDataLoad = DateTime.now();
   static const int _minRefreshIntervalMs = 5000;
   DateRangeType _dateRangeType = DateRangeType.thisMonth;
   DateTime _customStartDate = DateTime.now();
   DateTime _customEndDate = DateTime.now();
+
+  // Safe to Spend state
+  SafeToSpendResult? _safeToSpendResult;
 
   // Ensures the one-time first-run SMS import only runs once per app lifecycle
   static bool _firstRunHandled = false;
@@ -83,6 +93,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     // Start background scanning for new SMS every 5 min
     _smsHistoryService.startBackgroundScanning();
 
+    // Initialize proactive AI
+    _proactiveAi.initialize();
+
     // Check if this is first run — show initial balance setup
     _checkFirstRun();
 
@@ -90,12 +103,38 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _loadDateRangePreferences();
 
     // Listen for real-time incoming SMS transactions and auto-refresh UI (throttled)
-    _smsSubscription = _enhancedSmsService.transactionStream.listen((_) {
+    _smsSubscription = _enhancedSmsService.transactionStream.listen((_) async {
       if (mounted) {
         final now = DateTime.now();
         if (now.difference(_lastDataLoad).inMilliseconds >= _minRefreshIntervalMs) {
           _lastDataLoad = now;
-          _loadData();
+          await _loadData();
+
+          // Show proactive AI nudge for new SMS transaction
+          if (mounted && _recentTransactions.isNotEmpty) {
+            final latest = _recentTransactions.first;
+            if (latest.type == 'debit') {
+              final nudge = await _proactiveAi.analyzeNewTransaction(
+                latest,
+                _recentTransactions,
+              );
+              if (mounted && nudge != null) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Row(
+                      children: [
+                        const Icon(Icons.auto_awesome, color: Colors.white, size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(child: Text(nudge, style: const TextStyle(fontSize: 13))),
+                      ],
+                    ),
+                    backgroundColor: AppTheme.primary,
+                    duration: const Duration(seconds: 4),
+                  ),
+                );
+              }
+            }
+          }
         }
       }
     });
@@ -172,102 +211,23 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     super.dispose();
   }
 
-  /// Check if this is first run and show corrected balance setup
+  /// Check if this is first run and show onboarding
   Future<void> _checkFirstRun() async {
     final prefs = await SharedPreferences.getInstance();
-    final hasCorrectedBalance = prefs.getDouble('corrected_balance') != null;
     final hasSeenOnboarding = prefs.getBool('has_seen_onboarding') ?? false;
 
     if (!hasSeenOnboarding && mounted) {
-      await Future.delayed(const Duration(milliseconds: 500));
+      await Future.delayed(const Duration(milliseconds: 300));
       if (mounted) {
-        _showCorrectedBalanceDialog();
+        final result = await Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const OnboardingScreen()),
+        );
+        if (result == true && mounted) {
+          _loadData();
+        }
       }
     }
-  }
-
-  /// Show corrected balance setup dialog
-  void _showCorrectedBalanceDialog() {
-    final controller = TextEditingController();
-    showDialog(
-      context: context,
-      barrierDismissible: true,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.surfaceCard,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                gradient: AppTheme.primaryGradient,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Icon(Icons.account_balance_wallet_rounded, color: Colors.white, size: 24),
-            ),
-            const SizedBox(width: 12),
-            const Expanded(
-              child: Text('Welcome to Thangu!', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            ),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'To show accurate balances, you can enter your current account balance. '
-              'This is optional — you can always set or adjust it later from Settings.',
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: controller,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              autofocus: true,
-              decoration: InputDecoration(
-                labelText: 'Current Balance (QAR)',
-                hintText: 'e.g., 10000 or leave empty to skip',
-                filled: true,
-                fillColor: AppTheme.surface,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                prefixIcon: const Icon(Icons.money_rounded, color: AppTheme.textTertiary),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () async {
-              final prefs = await SharedPreferences.getInstance();
-              await prefs.setBool('has_seen_onboarding', true);
-              if (context.mounted) Navigator.pop(ctx);
-              _loadData();
-            },
-            child: const Text('Skip'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              final amount = double.tryParse(controller.text) ?? 0;
-              final prefs = await SharedPreferences.getInstance();
-              await prefs.setDouble('corrected_balance', amount);
-              await prefs.setBool('has_seen_onboarding', true);
-              if (context.mounted) {
-                Navigator.pop(ctx);
-                _loadData();
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.primary,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
   }
 
   /// Load date range from preferences
@@ -494,6 +454,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       // Fetch unverified transaction count for badge
       final unverifiedTxns = await _dbService.getUnverifiedTransactions();
 
+      // Calculate Safe to Spend in background (don't block UI)
+      _safeToSpendCalc.calculate().then((result) {
+        if (mounted) {
+          setState(() => _safeToSpendResult = result);
+        }
+      }).catchError((e) {
+        debugPrint('Error calculating Safe to Spend: $e');
+      });
+
       setState(() {
         _recentTransactions = transactions.take(10).toList();
         _goals = goals;
@@ -512,10 +481,26 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         _lastDataLoad = DateTime.now();
       });
       _fadeController.forward();
+
+      // Load AI insight in background (don't block UI)
+      _loadAiInsight(transactions);
     } catch (e) {
       debugPrint('Error loading dashboard data: $e');
       setState(() => _isLoading = false);
       _fadeController.forward();
+    }
+  }
+
+  Future<void> _loadAiInsight(List<app_txn.Transaction> transactions) async {
+    try {
+      final insight = await _proactiveAi.analyzeSpendingTrends(
+        transactions.where((t) => t.type == 'debit').take(20).toList(),
+      );
+      if (mounted && insight != null && insight.isNotEmpty) {
+        setState(() => _aiInsight = insight);
+      }
+    } catch (e) {
+      debugPrint('Error loading AI insight: $e');
     }
   }
 
@@ -790,8 +775,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  void _navigateTo(Widget screen) {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
+  Future<void> _navigateTo(Widget screen) async {
+    final result = await Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
+    if (result == true && mounted) {
+      _loadData();
+    }
   }
 
   @override
@@ -814,6 +802,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       children: [
                         _buildHeader(),
                         const SizedBox(height: 24),
+                        _buildSafeToSpendCard(),
+                        const SizedBox(height: 16),
                         _buildBalanceCard(),
                         const SizedBox(height: 20),
                         _buildIncomeExpenseRow(),
@@ -899,6 +889,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   duration: const Duration(seconds: 2),
                 ),
               );
+              if (result > 0) {
+                _loadData();
+              }
             }
           },
           onLongPress: () async {
@@ -985,6 +978,234 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             ),
         ],
       ),
+    );
+  }
+
+  // ─── Safe to Spend Card ──────────────────────────────────
+  Widget _buildSafeToSpendCard() {
+    if (_safeToSpendResult == null) {
+      return _buildSafeToSpendLoading();
+    }
+
+    final result = _safeToSpendResult!;
+    final healthColor = result.healthLevel == 'healthy'
+        ? AppTheme.accentGreen
+        : result.healthLevel == 'tight'
+            ? AppTheme.accentOrange
+            : AppTheme.accentRed;
+
+    return GestureDetector(
+      onTap: () => _showSafeToSpendBreakdown(result),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              healthColor.withOpacity(0.15),
+              healthColor.withOpacity(0.05),
+            ],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+          border: Border.all(color: healthColor.withOpacity(0.3), width: 1),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: healthColor.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(
+                    result.healthLevel == 'healthy'
+                        ? Icons.shield_outlined
+                        : result.healthLevel == 'tight'
+                            ? Icons.warning_amber_outlined
+                            : Icons.error_outline,
+                    color: healthColor,
+                    size: 18,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  'Safe to Spend This Week',
+                  style: TextStyle(
+                    color: healthColor,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const Spacer(),
+                Icon(Icons.info_outline, color: healthColor.withOpacity(0.6), size: 16),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'QAR ${result.safeToSpend.toStringAsFixed(2)}',
+              style: TextStyle(
+                color: healthColor,
+                fontSize: 32,
+                fontWeight: FontWeight.bold,
+                letterSpacing: -1,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'QAR ${result.dailyBudget.toStringAsFixed(0)} / day',
+              style: TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: 13,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: healthColor.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                result.healthLevel == 'healthy'
+                    ? '✓ You\'re in good shape'
+                    : result.healthLevel == 'tight'
+                        ? '⚠ Budget is tight'
+                        : '✗ Critical — reduce spending',
+                style: TextStyle(
+                  color: healthColor,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSafeToSpendLoading() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppTheme.surface.withOpacity(0.5),
+        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+        border: Border.all(color: AppTheme.surfaceLight, width: 1),
+      ),
+      child: Row(
+        children: [
+          const SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primary)),
+          ),
+          const SizedBox(width: 12),
+          Text(
+            'Calculating Safe to Spend...',
+            style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showSafeToSpendBreakdown(SafeToSpendResult result) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppTheme.surfaceCard,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(
+                  'Safe to Spend Breakdown',
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.close, color: AppTheme.textSecondary),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            _buildBreakdownRow('Current Balance', 'QAR ${result.currentBalance.toStringAsFixed(2)}', AppTheme.textPrimary),
+            const SizedBox(height: 12),
+            _buildBreakdownRow('Upcoming Bills (7 days)', '- QAR ${result.upcomingBills.toStringAsFixed(2)}', AppTheme.accentOrange),
+            const SizedBox(height: 12),
+            GestureDetector(
+              onTap: () {
+                Navigator.pop(context);
+                _navigateTo(const SubscriptionsScreen());
+              },
+              child: _buildBreakdownRow(
+                'Subscriptions (weekly)',
+                '- QAR ${result.weeklySubscriptions.toStringAsFixed(2)} →',
+                AppTheme.accentOrange,
+              ),
+            ),
+            const SizedBox(height: 12),
+            _buildBreakdownRow('Savings Goals (weekly)', '- QAR ${result.weeklyGoalContribution.toStringAsFixed(2)}', AppTheme.accentOrange),
+            const SizedBox(height: 12),
+            _buildBreakdownRow('Emergency Buffer (10%)', '- QAR ${result.buffer.toStringAsFixed(2)}', AppTheme.accentOrange),
+            const Divider(height: 24, color: AppTheme.surfaceLight),
+            _buildBreakdownRow(
+              'Safe to Spend',
+              'QAR ${result.safeToSpend.toStringAsFixed(2)}',
+              result.healthLevel == 'healthy' ? AppTheme.accentGreen : AppTheme.accentRed,
+              isTotal: true,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Daily budget: QAR ${result.dailyBudget.toStringAsFixed(0)}',
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+            ),
+            const SizedBox(height: 24),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBreakdownRow(String label, String value, Color color, {bool isTotal = false}) {
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            label,
+            style: TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: isTotal ? 16 : 14,
+              fontWeight: isTotal ? FontWeight.bold : FontWeight.normal,
+            ),
+          ),
+        ),
+        Text(
+          value,
+          style: TextStyle(
+            color: color,
+            fontSize: isTotal ? 18 : 14,
+            fontWeight: isTotal ? FontWeight.bold : FontWeight.w600,
+          ),
+        ),
+      ],
     );
   }
 
@@ -2043,19 +2264,21 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   const Icon(Icons.auto_awesome, color: Colors.white, size: 24),
             ),
             const SizedBox(width: 16),
-            const Expanded(
+            Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('AI Insight',
+                  const Text('AI Insight',
                       style: TextStyle(color: Colors.white70, fontSize: 12)),
-                  SizedBox(height: 4),
+                  const SizedBox(height: 4),
                   Text(
-                    'Ask Thangu for personalized financial tips & analysis',
+                    _aiInsight ?? 'Ask Thangu for personalized financial tips & analysis',
                     style: TextStyle(
                         color: Colors.white,
                         fontSize: 14,
                         fontWeight: FontWeight.w600),
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ],
               ),

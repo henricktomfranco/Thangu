@@ -11,6 +11,8 @@ import 'package:thangu/services/sms_history_service.dart';
 import 'add_transaction_screen.dart';
 import 'debug_screen.dart';
 import 'transaction_verification_screen.dart';
+import 'subscriptions_screen.dart';
+import 'remittances_screen.dart';
 import '../app_theme.dart';
 import '../services/ai_service.dart';
 import 'category_management_screen.dart';
@@ -726,6 +728,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 context,
                 MaterialPageRoute(
                   builder: (_) => const CategoryManagementScreen(),
+                ),
+              ),
+            ),
+            _buildDivider(),
+            _buildNavigationRow(
+              icon: Icons.autorenew_rounded,
+              iconColor: AppTheme.accentOrange,
+              title: 'Subscriptions',
+              subtitle: 'View and manage recurring charges',
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const SubscriptionsScreen(),
+                ),
+              ),
+            ),
+            _buildDivider(),
+            _buildNavigationRow(
+              icon: Icons.airplanemode_active_rounded,
+              iconColor: AppTheme.accentGreen,
+              title: 'Money Sent Home',
+              subtitle: 'Track remittances and transfers',
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const RemittancesScreen(),
                 ),
               ),
             ),

@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:thangu/app_theme.dart';
 import 'package:thangu/models/transaction.dart';
 import 'package:thangu/services/database_service.dart';
+import 'package:thangu/services/ai_service.dart';
 
 class AddTransactionScreen extends StatefulWidget {
   const AddTransactionScreen({super.key});
@@ -38,12 +39,81 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   ];
 
   bool _isSaving = false;
+  bool _isAiCategorizing = false;
+  final AiService _aiService = AiService();
 
   @override
   void dispose() {
     _amountController.dispose();
     _descriptionController.dispose();
     super.dispose();
+  }
+
+  Future<void> _aiCategorize() async {
+    if (_descriptionController.text.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Enter a description first so AI can categorize'),
+            backgroundColor: AppTheme.accentOrange,
+          ),
+        );
+      }
+      return;
+    }
+
+    setState(() => _isAiCategorizing = true);
+
+    try {
+      await _aiService.initialize();
+
+      final tempTxn = Transaction(
+        id: 'temp',
+        amount: double.tryParse(_amountController.text) ?? 0,
+        type: _type,
+        category: 'Other',
+        description: _descriptionController.text,
+        date: DateTime.now(),
+        sender: 'Manual',
+        isCategorizedByAI: false,
+        aiConfidence: 0,
+      );
+
+      final category = await _aiService.categorizeTransaction(tempTxn);
+
+      if (mounted) {
+        if (category != null && _categories.contains(category)) {
+          setState(() => _category = category);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('AI categorized as: $category'),
+              backgroundColor: AppTheme.accentGreen,
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('AI couldn\'t determine a category'),
+              backgroundColor: AppTheme.accentOrange,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('AI error: $e'),
+            backgroundColor: AppTheme.accentRed,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isAiCategorizing = false);
+      }
+    }
   }
 
   Future<void> _saveTransaction() async {
@@ -162,28 +232,55 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
             // Category
             _buildSectionHeader('Category'),
             const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              decoration: BoxDecoration(
-                color: AppTheme.surfaceCard,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<String>(
-                  value: _category,
-                  isExpanded: true,
-                  dropdownColor: AppTheme.surfaceLight,
-                  items: _categories
-                      .map((c) => DropdownMenuItem(
-                            value: c,
-                            child: Text(c),
-                          ))
-                      .toList(),
-                  onChanged: (value) {
-                    setState(() => _category = value!);
-                  },
+            Row(
+              children: [
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    decoration: BoxDecoration(
+                      color: AppTheme.surfaceCard,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        value: _category,
+                        isExpanded: true,
+                        dropdownColor: AppTheme.surfaceLight,
+                        items: _categories
+                            .map((c) => DropdownMenuItem(
+                                  value: c,
+                                  child: Text(c),
+                                ))
+                            .toList(),
+                        onChanged: (value) {
+                          setState(() => _category = value!);
+                        },
+                      ),
+                    ),
+                  ),
                 ),
-              ),
+                const SizedBox(width: 8),
+                GestureDetector(
+                  onTap: _isAiCategorizing ? null : _aiCategorize,
+                  child: Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      gradient: AppTheme.primaryGradient,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: _isAiCategorizing
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation(Colors.white),
+                            ),
+                          )
+                        : const Icon(Icons.auto_awesome_rounded, color: Colors.white, size: 20),
+                  ),
+                ),
+              ],
             ),
 
             const SizedBox(height: 24),
